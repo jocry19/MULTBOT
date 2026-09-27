@@ -55,8 +55,13 @@ export class ResearchHost extends BaseModule {
   }
 
   private spawn(): void {
-    const url = new URL("./worker.js", import.meta.url);
-    const w = new Worker(url, { workerData: { settings: this.settings() } });
+    // dev (tsx): run the TypeScript source with the same loader; prod: the compiled .js file
+    const isTs = import.meta.url.endsWith(".ts");
+    const url = new URL(isTs ? "./worker-dev.mjs" : "./worker.js", import.meta.url);
+    const w = new Worker(url, {
+      workerData: { settings: this.settings() },
+      execArgv: isTs ? ["--conditions=source"] : [],
+    });
     this.worker = w;
     this.ready = false;
     w.on("message", (m: FromWorker) => this.onMessage(m));

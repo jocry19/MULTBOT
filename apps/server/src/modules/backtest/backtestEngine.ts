@@ -11,7 +11,8 @@ import {
 } from "../execution/simulator.js";
 import type { FeatureVector } from "../features/types.js";
 import { hashSeed, performance, seededRandom } from "../stats/stats.js";
-import { invalidated, matchSpec } from "../strategy/evaluate.js";
+import { matchSpec } from "../strategy/evaluate.js";
+import { featureExit, priceExit, updateExtremes, type HeldPosition } from "../trading/exitRules.js";
 
 /**
  * Event-driven, strictly causal backtest of a strategy spec.
@@ -226,36 +227,39 @@ export function findExit(
   laterSamples: DecisionSample[],
 ): { exitDecisionTs: number; reason: ExitReason } {
   const maxTs = entry.execTs + spec.exit.maxHoldSec * 1000;
-  const ref = entry.effectivePrice;
-  const tp = spec.exit.takeProfitPct;
-  const sl = spec.exit.stopLossPct;
-  const trail = spec.exit.trailingStopPct;
-  let peak = entry.spotPrice;
   const mint = entry.mint;
+  const entryState = view.stateAt(mint, entry.execTs);
+  const pos: HeldPosition = {
+    entryPrice: entry.effectivePrice,
+    entrySpot: entry.spotPrice,
+    entryLiquidity: entryState?.curve ? Number(entryState.curve.realSolReserves) / 1e9 : entryState?.pool ? Number(entryState.pool.quoteReserves) / 1e9 : 0,
+    openedAt: entry.execTs,
+    peak: entry.spotPrice,
+    trough: entry.spotPrice,
+  };
   const arr = view.tradesOf(mint);
   let sIdx = laterSamples.findIndex((s) => s.ts > entry.execTs);
   if (sIdx < 0) sIdx = laterSamples.length;
+  const checkSamplesUntil = (t: number): { exitDecisionTs: number; reason: ExitReason } | null => {
+    while (sIdx < laterSamples.length && (laterSamples[sIdx] as DecisionSample).ts <= t) {
+      const sample = laterSamples[sIdx] as DecisionSample;
+      sIdx++;
+      if (sample.ts > maxTs) return null;
+      const r = featureExit(spec, pos, sample.features);
+      if (r) return { exitDecisionTs: sample.ts, reason: r };
+    }
+    return null;
+  };
   for (let i = view.indexAt(mint, entry.execTs) + 1; i < arr.length; i++) {
     const t = arr[i];
     if (!t || t.ts > maxTs) break;
-    // invalidation checks at decision samples before this trade
-    while (sIdx < laterSamples.length && (laterSamples[sIdx] as DecisionSample).ts <= t.ts) {
-      const sample = laterSamples[sIdx] as DecisionSample;
-      if (sample.ts > maxTs) break;
-      if (invalidated(spec, sample.features)) return { exitDecisionTs: sample.ts, reason: "SIGNAL_INVALIDATED" };
-      sIdx++;
-    }
-    const p = t.priceSol;
-    if (p > peak) peak = p;
-    if (tp !== undefined && p >= ref * (1 + tp)) return { exitDecisionTs: t.ts, reason: "TAKE_PROFIT" };
-    if (sl !== undefined && p <= ref * (1 - sl)) return { exitDecisionTs: t.ts, reason: "STOP_LOSS" };
-    if (trail !== undefined && p <= peak * (1 - trail) && peak > ref) return { exitDecisionTs: t.ts, reason: "TRAILING_STOP" };
+    const bySample = checkSamplesUntil(t.ts);
+    if (bySample) return bySample;
+    updateExtremes(pos, t.priceSol);
+    const r = priceExit(spec, pos, t.priceSol, t.ts);
+    if (r && r !== "MAX_HOLD") return { exitDecisionTs: t.ts, reason: r };
   }
-  while (sIdx < laterSamples.length && (laterSamples[sIdx] as DecisionSample).ts <= maxTs) {
-    const sample = laterSamples[sIdx] as DecisionSample;
-    if (invalidated(spec, sample.features)) return { exitDecisionTs: sample.ts, reason: "SIGNAL_INVALIDATED" };
-    sIdx++;
-  }
+  const bySample = checkSamplesUntil(maxTs);
+  if (bySample) return bySample;
   return { exitDecisionTs: maxTs, reason: "MAX_HOLD" };
 }
-

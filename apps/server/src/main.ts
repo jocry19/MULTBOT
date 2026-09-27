@@ -1,10 +1,13 @@
+import type { FastifyInstance } from "fastify";
 import { App } from "./app/app.js";
+import { buildServer } from "./api/server.js";
 import { loadConfig } from "./core/config.js";
 import { createLogger } from "./core/logger.js";
 
 const config = loadConfig();
 const log = createLogger({ level: config.logLevel, logDir: config.logDir });
 const app = new App(config, log);
+let server: FastifyInstance | null = null;
 
 let stopping = false;
 async function shutdown(signal: string, code = 0): Promise<void> {
@@ -17,6 +20,7 @@ async function shutdown(signal: string, code = 0): Promise<void> {
   }, 30_000);
   timer.unref();
   try {
+    await server?.close();
     await app.stop();
   } catch (err) {
     log.error({ err }, "shutdown error");
@@ -34,6 +38,12 @@ process.on("uncaughtException", (err) => {
 
 try {
   await app.start();
+  server = await buildServer(app);
+  await server.listen({ host: config.http.host, port: config.http.port });
+  log.info({ host: config.http.host, port: config.http.port, auth: Boolean(config.auth.adminPasswordHash) }, "dashboard API listening");
+  if (!config.auth.adminPasswordHash) {
+    log.warn("ADMIN_PASSWORD_HASH not set: dashboard is unauthenticated (bind to localhost only) and real-money actions are disabled");
+  }
 } catch (err) {
   log.fatal({ err }, "startup failed");
   await app.stop().catch(() => undefined);

@@ -17,6 +17,17 @@ import { SolanaWsClient } from "../modules/solana/wsClient.js";
 import { StateStore } from "../modules/system/stateStore.js";
 import { WalletAnalyzer } from "../modules/wallets/walletAnalyzer.js";
 import { WalletBook } from "../modules/wallets/walletBook.js";
+import { PaperEngine } from "../modules/paper/paperEngine.js";
+import { ResearchHost } from "../modules/research/researchHost.js";
+import { StrategyService } from "../modules/strategy/strategyService.js";
+import { Ledger } from "../modules/ledger/ledger.js";
+import { FxService } from "../modules/tax/fx.js";
+import { TaxLedger } from "../modules/tax/taxLedger.js";
+import { WalletService } from "../modules/wallet/walletService.js";
+import { ExecutionEngine } from "../modules/execution/executionEngine.js";
+import { JupiterProvider, PumpPortalProvider } from "../modules/execution/providers.js";
+import { LiveEngine } from "../modules/live/liveEngine.js";
+import { Reconciler } from "../modules/reconciliation/reconciler.js";
 import { BaseModule } from "../core/module.js";
 import type { BusEvents } from "./busEvents.js";
 
@@ -70,6 +81,16 @@ export class App {
   readonly collector: DataCollector;
   readonly indexer: MarketIndexer;
   readonly walletAnalyzer: WalletAnalyzer;
+  readonly strategies: StrategyService;
+  readonly research: ResearchHost;
+  readonly paper: PaperEngine;
+  readonly ledger: Ledger;
+  readonly fx: FxService;
+  readonly tax: TaxLedger;
+  readonly wallet: WalletService;
+  readonly execution: ExecutionEngine;
+  readonly live: LiveEngine;
+  readonly reconciler: Reconciler;
   readonly startedAt = Date.now();
 
   constructor(
@@ -92,12 +113,70 @@ export class App {
     this.collector = new DataCollector(this.db, this.bus, log.child({ module: "collector" }), () => this.stream.takeGaps());
     this.indexer = new MarketIndexer(this.db, this.bus, this.wallets, clock, this.activity, log.child({ module: "indexer" }));
     this.walletAnalyzer = new WalletAnalyzer(this.db, this.wallets, clock, log.child({ module: "wallets" }));
+    this.strategies = new StrategyService(this.db);
+    this.research = new ResearchHost(() => this.state.get(), this.activity, log.child({ module: "research-host" }));
+    this.paper = new PaperEngine(this.db, this.bus, this.indexer.market, this.strategies, () => this.state.get(), this.activity, clock, log.child({ module: "paper" }));
+    this.research.onStrategiesChanged(() => {
+      void this.paper.reload();
+      void this.indexer.loadDerived();
+      this.bus.emit("invalidate", ["strategies"]);
+    });
+    this.state.onChange((s) => this.research.pushSettings(s));
+
+    this.ledger = new Ledger(this.db);
+    this.fx = new FxService(this.db, config.fx.provider, log.child({ module: "fx" }));
+    this.tax = new TaxLedger(this.db, this.fx);
+    this.wallet = new WalletService(
+      this.db,
+      this.rpc,
+      config.wallet.keystorePath,
+      config.wallet.passphrase,
+      () => this.state.get(),
+      this.activity,
+      () => this.ledger,
+      () => this.tax,
+      () => this.execution,
+      log.child({ module: "wallet" }),
+    );
+    this.execution = new ExecutionEngine(
+      this.db,
+      this.rpc,
+      this.wallet.signer,
+      { jupiter: new JupiterProvider(config.jupiter.apiUrl, config.jupiter.apiKey), pumpportal: new PumpPortalProvider(config.pumpPortal.apiUrl) },
+      () => this.state.get(),
+      clock,
+      log.child({ module: "execution" }),
+    );
+    this.live = new LiveEngine(
+      this.db,
+      this.bus,
+      this.indexer.market,
+      this.strategies,
+      this.state,
+      this.wallet,
+      this.execution,
+      this.ledger,
+      this.tax,
+      this.rpc,
+      this.activity,
+      clock,
+      log.child({ module: "live" }),
+      () => this.stream.lastEventAt,
+    );
+    this.reconciler = new Reconciler(this.db, this.wallet, this.execution, this.ledger, this.state, this.activity, () => this.live.loadPositions(), log.child({ module: "reconciliation" }));
+    this.research.onStrategiesChanged(() => void this.live.reload());
 
     this.registry.register(new Housekeeping(this.db, this.activity, log.child({ module: "housekeeping" }), () => this.state.get()));
     this.registry.register(this.rpc);
+    // crash recovery order: wallet sync → reconciliation → analysis → engines
+    this.registry.register(this.wallet);
+    this.registry.register(this.reconciler);
     this.registry.register(this.walletAnalyzer);
     this.registry.register(this.indexer);
     this.registry.register(this.collector);
+    if (config.features.research) this.registry.register(this.research);
+    if (config.features.paper) this.registry.register(this.paper);
+    if (config.features.liveEngine) this.registry.register(this.live);
     if (config.features.ingest) this.registry.register(this.stream);
   }
 
