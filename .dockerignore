@@ -1,0 +1,15 @@
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+**/coverage
+.git
+.github
+.env
+.env.*
+secrets
+logs
+data
+*.log
+**/*.keystore.json
+**/*.key
+id.json

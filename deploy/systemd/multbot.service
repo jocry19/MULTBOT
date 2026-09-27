@@ -1,0 +1,45 @@
+# MULTBOT as a supervised systemd service (alternative to docker compose).
+#   sudo useradd --system --home /opt/multbot --shell /usr/sbin/nologin multbot
+#   sudo cp -r <build output> /opt/multbot  &&  sudo cp deploy/systemd/multbot.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now multbot
+#   journalctl -u multbot -f
+[Unit]
+Description=MULTBOT Solana research & trading system
+Wants=network-online.target
+After=network-online.target postgresql.service
+
+[Service]
+Type=simple
+User=multbot
+Group=multbot
+WorkingDirectory=/opt/multbot/apps/server
+EnvironmentFile=/opt/multbot/.env
+Environment=NODE_ENV=production
+Environment=WEB_DIST_DIR=/opt/multbot/apps/web/dist
+Environment=LOG_DIR=/var/log/multbot
+ExecStart=/usr/bin/node --enable-source-maps dist/main.js
+# graceful shutdown (open orders are persisted before sending; recovery runs on start)
+KillSignal=SIGTERM
+TimeoutStopSec=45
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=300
+StartLimitBurst=10
+LogsDirectory=multbot
+
+# hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/opt/multbot
+ReadWritePaths=/var/log/multbot
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
