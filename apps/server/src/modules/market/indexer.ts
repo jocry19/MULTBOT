@@ -8,7 +8,7 @@ import type { MarketEvent } from "../../domain/market.js";
 import { ContextBaselines, contextKey, type BaselineSnapshot } from "../anomaly/baselines.js";
 import { EventEngine, type DetectedEvent } from "../events/eventEngine.js";
 import { applyDerived, type DerivedFeatureDef } from "../features/derived.js";
-import { compactFeatures, computeFeatures } from "../features/featureEngine.js";
+import { compactFeatures, computeFeatures, holderStats } from "../features/featureEngine.js";
 import type { FeatureVector } from "../features/types.js";
 import { computeRegimeMetrics, RegimeEngine, type RegimeState } from "../regime/regimeEngine.js";
 import type { WalletBook } from "../wallets/walletBook.js";
@@ -444,6 +444,8 @@ export class MarketIndexer extends BaseModule {
         t.trades,
         t.traderFirstSeen.size,
         t.holderCount(),
+        // concentration is only meaningful when every holder was observed from creation
+        t.seenFromCreation ? holderStats(t).top10 : null,
         p5 ? t.lastPrice / p5 - 1 : null,
         p60 ? t.lastPrice / p60 - 1 : null,
         disc.score,
@@ -470,6 +472,7 @@ export class MarketIndexer extends BaseModule {
         "trades_total",
         "unique_traders",
         "holders",
+        "top10_share",
         "price_change_5m",
         "price_change_1h",
         "discovery_score",
@@ -482,7 +485,7 @@ export class MarketIndexer extends BaseModule {
         volume_sol_5m = EXCLUDED.volume_sol_5m, volume_sol_1h = EXCLUDED.volume_sol_1h, volume_sol_24h = EXCLUDED.volume_sol_24h,
         buys_5m = EXCLUDED.buys_5m, sells_5m = EXCLUDED.sells_5m,
         trades_total = GREATEST(token_state.trades_total, EXCLUDED.trades_total),
-        unique_traders = GREATEST(token_state.unique_traders, EXCLUDED.unique_traders), holders = EXCLUDED.holders,
+        unique_traders = GREATEST(token_state.unique_traders, EXCLUDED.unique_traders), holders = EXCLUDED.holders, top10_share = EXCLUDED.top10_share,
         price_change_5m = EXCLUDED.price_change_5m, price_change_1h = EXCLUDED.price_change_1h,
         discovery_score = EXCLUDED.discovery_score, discovery_reasons = EXCLUDED.discovery_reasons, updated_at = now()`,
     );

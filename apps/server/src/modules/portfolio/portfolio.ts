@@ -38,7 +38,7 @@ export function liquidationValue(market: MarketState, mint: string, tokenRaw: bi
   return (Number(tokenRaw) / 10 ** decimals) * t.lastPrice;
 }
 
-export async function portfolio(db: Database, market: MarketState, mode: "paper" | "live", opts: { walletLamports?: number | null; paperCapitalSol?: number }): Promise<PortfolioSummary & { positions: (OpenRow & { valueSol: number; unrealizedSol: number })[] }> {
+export async function portfolio(db: Database, market: MarketState, mode: "paper" | "live", opts: { walletLamports?: number | null; paperCapitalSol?: number }): Promise<PortfolioSummary & { positions: (OpenRow & { symbol: string | null; valueSol: number; unrealizedSol: number })[] }> {
   const table = mode === "paper" ? "paper_trades" : "live_trades";
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
@@ -62,7 +62,7 @@ export async function portfolio(db: Database, market: MarketState, mode: "paper"
     const cost = p.gross_entry_sol ?? p.position_size_sol;
     value += v;
     locked += cost;
-    return { ...p, valueSol: v, unrealizedSol: v - cost };
+    return { ...p, symbol: market.tokens.get(p.mint)?.symbol ?? null, valueSol: v, unrealizedSol: v - cost };
   });
   const realized = agg?.realized ?? 0;
   const unrealized = positions.reduce((s, p) => s + p.unrealizedSol, 0);

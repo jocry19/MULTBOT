@@ -58,7 +58,7 @@ const CREATION_DEPENDENT_FEATURES = [
   "drawdown_from_ath",
 ];
 
-function holderStats(t: TokenState): {
+export function holderStats(t: TokenState): {
   count: number;
   top1: number;
   top10: number;

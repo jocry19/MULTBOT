@@ -206,8 +206,9 @@ export class DataCollector extends BaseModule {
     if (unknown.size > 0) {
       await this.db.insertMany(
         "tokens",
-        ["mint", "decimals", "available_at", "source", "amm_pool", "total_supply"],
-        [...unknown.values()].map((t) => [t.mint, t.tokenDecimals, new Date(t.availableAt), "discovered", t.pool, t.tokenSupply?.toString() ?? null]),
+        ["mint", "decimals", "available_at", "source", "amm_pool", "amm_quote_mint", "total_supply"],
+        // AMM trades only pass normalisation for verified SOL-quoted pools
+        [...unknown.values()].map((t) => [t.mint, t.tokenDecimals, new Date(t.availableAt), "discovered", t.pool, t.pool ? WSOL_MINT : null, t.tokenSupply?.toString() ?? null]),
         "ON CONFLICT (mint) DO NOTHING",
       );
       for (const m of unknown.keys()) this.knownMints.add(m);
@@ -226,17 +227,25 @@ export class DataCollector extends BaseModule {
         await this.db.query(
           `INSERT INTO tokens (mint, available_at, source, migrated_at, amm_pool, complete_at) VALUES ($1, $2, 'discovered', $3, $4, $3)
            ON CONFLICT (mint) DO UPDATE SET migrated_at = COALESCE(tokens.migrated_at, EXCLUDED.migrated_at), amm_pool = EXCLUDED.amm_pool,
+             amm_quote_mint = CASE WHEN tokens.amm_pool IS DISTINCT FROM EXCLUDED.amm_pool THEN NULL ELSE tokens.amm_quote_mint END,
              complete_at = COALESCE(tokens.complete_at, EXCLUDED.complete_at)`,
           [e.data.mint, new Date(e.data.availableAt), new Date(e.data.ts), e.data.pool],
         );
         this.knownMints.add(e.data.mint);
       } else if (e.kind === "pool" && e.data.quoteMint === WSOL_MINT) {
         await this.db.query(
-          `INSERT INTO tokens (mint, available_at, source, amm_pool, decimals) VALUES ($1, $2, 'discovered', $3, $4)
-           ON CONFLICT (mint) DO UPDATE SET amm_pool = COALESCE(tokens.amm_pool, EXCLUDED.amm_pool)`,
-          [e.data.baseMint, new Date(e.data.availableAt), e.data.pool, e.data.baseDecimals],
+          `INSERT INTO tokens (mint, available_at, source, amm_pool, amm_quote_mint, decimals) VALUES ($1, $2, 'discovered', $3, $5, $4)
+           ON CONFLICT (mint) DO UPDATE SET amm_pool = COALESCE(tokens.amm_pool, EXCLUDED.amm_pool),
+             amm_quote_mint = CASE WHEN tokens.amm_pool IS NULL OR tokens.amm_pool = EXCLUDED.amm_pool THEN EXCLUDED.amm_quote_mint ELSE tokens.amm_quote_mint END`,
+          [e.data.baseMint, new Date(e.data.availableAt), e.data.pool, e.data.baseDecimals, WSOL_MINT],
         );
         this.knownMints.add(e.data.baseMint);
+      } else if (e.kind === "pool" && e.data.pool) {
+        // non-SOL pool (e.g. USDC-quoted): remember the quote so it is never read as SOL; no new token rows
+        await this.db.query(
+          "UPDATE tokens SET amm_pool = COALESCE(amm_pool, $2), amm_quote_mint = $3 WHERE mint = $1 AND (amm_pool IS NULL OR amm_pool = $2)",
+          [e.data.baseMint, e.data.pool, e.data.quoteMint],
+        );
       }
     }
   }

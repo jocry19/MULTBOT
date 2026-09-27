@@ -17,7 +17,7 @@ export async function registerPaperRoutes(f: FastifyInstance, app: App): Promise
         WHERE p.status IN ('CLOSED','FAILED') AND p.net_pnl_sol IS NOT NULL GROUP BY p.strategy_id, s.name, s.status`,
     );
     const freq = await app.db.many<{ strategy_id: string; per_hour: number }>(
-      `SELECT strategy_id, count(*) / GREATEST(1, EXTRACT(EPOCH FROM (max(decision_ts) - min(decision_ts))) / 3600.0) AS per_hour
+      `SELECT strategy_id, (count(*) / GREATEST(1, EXTRACT(EPOCH FROM (max(decision_ts) - min(decision_ts))) / 3600.0))::float8 AS per_hour
          FROM paper_trades GROUP BY strategy_id`,
     );
     const freqMap = new Map(freq.map((x) => [x.strategy_id, x.per_hour]));
