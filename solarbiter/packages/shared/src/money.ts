@@ -58,3 +58,22 @@ export function maxBigInt(...xs: bigint[]): bigint {
 export function minBigInt(...xs: bigint[]): bigint {
   return xs.reduce((a, b) => (b < a ? b : a));
 }
+
+/** Minimum output a swap with this slippage tolerance enforces (rounded down: never assume more). */
+export function minOutForSlippage(quotedOut: bigint, slippageBps: number): bigint {
+  if (!Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps > 10_000) throw new Error(`invalid slippageBps ${slippageBps}`);
+  return (quotedOut * BigInt(10_000 - slippageBps)) / 10_000n;
+}
+
+/**
+ * Smallest slippage tolerance (bps) whose enforced minimum output still reaches `requiredOut`.
+ * Returns null if even 0 bps cannot reach it (the quote itself is below the requirement).
+ */
+export function maxSlippageForMinOut(quotedOut: bigint, requiredOut: bigint): number | null {
+  if (quotedOut < requiredOut || quotedOut <= 0n) return null;
+  // largest s with quotedOut × (10000 − s) / 10000 ≥ requiredOut
+  let s = Number(((quotedOut - requiredOut) * 10_000n) / quotedOut);
+  s = Math.min(10_000, Math.max(0, s));
+  while (s > 0 && minOutForSlippage(quotedOut, s) < requiredOut) s--;
+  return minOutForSlippage(quotedOut, s) >= requiredOut ? s : null;
+}

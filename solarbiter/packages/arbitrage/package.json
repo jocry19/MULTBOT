@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@solarbiter/dex": "workspace:*",
+    "@solarbiter/profit-engine": "workspace:*",
     "@solarbiter/quotes": "workspace:*",
     "@solarbiter/shared": "workspace:*",
     "pino": "^10.3.1"

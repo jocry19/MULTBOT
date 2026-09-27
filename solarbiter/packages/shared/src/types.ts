@@ -204,3 +204,22 @@ export interface RiskDecision {
   reasons: string[];
   checks: Record<string, boolean>;
 }
+
+/** Features of one opportunity used by the learned execution/slippage models. */
+export interface ExecutionFeatures {
+  strategyType: StrategyType;
+  hops: number;
+  /** Venue sequence, e.g. "raydium>orca". */
+  dexes: string;
+  sizeEur: number;
+  /** Screening spread after pool fees (bps). */
+  screenSpreadBps: number;
+  /** Firm-quote gross (bps of input). */
+  grossBps: number;
+  quoteAgeMs: number;
+  latencyMs: number;
+  poolStateAgeMs: number;
+  /** Recent SOL/EUR volatility (abs % move over 5 min, in bps). */
+  volatilityBps: number;
+  hourUtc: number;
+}

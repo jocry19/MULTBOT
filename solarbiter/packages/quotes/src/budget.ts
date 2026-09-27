@@ -1,56 +1,70 @@
 /**
- * Request budget for rate-limited quote providers (Jupiter plans: keyless 0.5 rps, free key 1 rps,
- * developer 10 rps …). Requests are admitted by priority so that the checks that protect money
- * (final re-quote before sending, shadow re-quote) are never starved by exploratory size ladders.
+ * Request budget for the rate-limited routing API. Jupiter enforces its plan limits with a 60-second
+ * sliding window (keyless 30/min, free 60/min, developer 600/min …; quote and swap-instructions share
+ * the bucket). Bursts inside the window are allowed — which is what lets all legs of a route be quoted
+ * within the quote-freshness limit.
+ *
+ * Requests are admitted by priority so the checks that protect money (final re-quote before sending,
+ * shadow re-quote) are never starved by exploratory size-ladder quotes.
  */
 
 export type QuotePriority = "final" | "requote" | "verify" | "ladder";
 
+/** Share of the window that must stay free for higher priorities. */
 const PRIORITY_RESERVE: Record<QuotePriority, number> = {
-  // fraction of the bucket that must remain for higher priorities
   final: 0,
   requote: 0,
   verify: 0.25,
   ladder: 0.5,
 };
 
+/** Keep a small margin below the plan limit (other clients of the same key, clock skew). */
+const SAFETY_MARGIN = 0.9;
+
 export class QuoteBudget {
-  private tokens: number;
-  private last: number;
-  private readonly used: number[] = [];
+  readonly capacity: number;
+  private readonly stamps: number[] = [];
 
   constructor(
     readonly rps: number,
-    private readonly burst = Math.max(1, Math.ceil(rps * 2)),
     private readonly now: () => number = Date.now,
+    readonly windowMs = 60_000,
   ) {
-    this.tokens = this.burst;
-    this.last = now();
+    this.capacity = Math.max(1, Math.floor(((rps * windowMs) / 1000) * SAFETY_MARGIN));
   }
 
-  private refill(): void {
-    const t = this.now();
-    this.tokens = Math.min(this.burst, this.tokens + ((t - this.last) / 1000) * this.rps);
-    this.last = t;
+  private prune(): void {
+    const cutoff = this.now() - this.windowMs;
+    while (this.stamps.length && (this.stamps[0] as number) <= cutoff) this.stamps.shift();
   }
 
-  /** Take `n` tokens if available for this priority. */
+  private allowance(priority: QuotePriority): number {
+    return Math.floor(this.capacity * (1 - PRIORITY_RESERVE[priority]));
+  }
+
+  /** Requests still admissible right now at this priority. */
+  available(priority: QuotePriority): number {
+    this.prune();
+    return Math.max(0, this.allowance(priority) - this.stamps.length);
+  }
+
+  /** Take `n` requests if the window allows them at this priority. */
   tryTake(n: number, priority: QuotePriority): boolean {
-    this.refill();
-    const reserve = this.burst * PRIORITY_RESERVE[priority];
-    if (this.tokens - n < reserve - 1e-9) return false;
-    this.tokens -= n;
+    if (this.available(priority) < n) return false;
     const t = this.now();
-    for (let i = 0; i < n; i++) this.used.push(t);
+    for (let i = 0; i < n; i++) this.stamps.push(t);
     return true;
   }
 
-  /** Milliseconds until `n` tokens would be available at this priority. */
+  /** Milliseconds until `n` requests would be admissible at this priority. */
   waitMs(n: number, priority: QuotePriority): number {
-    this.refill();
-    const reserve = this.burst * PRIORITY_RESERVE[priority];
-    const missing = n + reserve - this.tokens;
-    return missing <= 0 ? 0 : Math.ceil((missing / this.rps) * 1000);
+    this.prune();
+    const allowed = this.allowance(priority);
+    if (n > allowed) return Number.POSITIVE_INFINITY;
+    const excess = this.stamps.length + n - allowed;
+    if (excess <= 0) return 0;
+    const releasing = this.stamps[excess - 1] as number;
+    return Math.max(0, releasing + this.windowMs - this.now() + 1);
   }
 
   /** Wait for capacity (bounded). Returns false if it would take longer than maxWaitMs. */
@@ -61,10 +75,9 @@ export class QuoteBudget {
     return this.tryTake(n, priority);
   }
 
-  /** Requests in the last minute and the plan's per-minute limit. */
+  /** Requests in the current window and the (margin-adjusted) window limit. */
   usage(): { used1m: number; limit1m: number } {
-    const cutoff = this.now() - 60_000;
-    while (this.used.length && (this.used[0] as number) < cutoff) this.used.shift();
-    return { used1m: this.used.length, limit1m: Math.floor(this.rps * 60) };
+    this.prune();
+    return { used1m: this.stamps.length, limit1m: this.capacity };
   }
 }

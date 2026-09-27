@@ -100,18 +100,20 @@ describe("JupiterClient", () => {
     await expect(c.quote(baseReq, ["Whirlpool"], "orca")).rejects.toThrow(/outside the filter/);
   });
 
-  it("refuses quotes when the request budget is exhausted (priorities respected)", async () => {
+  it("refuses quotes when the request budget is exhausted (priorities respected, 60 s sliding window)", async () => {
     let t = 0;
-    const budget = new QuoteBudget(0.5, 2, () => t);
+    const budget = new QuoteBudget(0.5, () => t); // keyless: 30/min, 27 after the safety margin
     const c = new JupiterClient({ baseUrl: "https://x.test", rps: 0.5, log, budget, now: () => t, fetchImpl: fakeFetch({ "/quote": () => fixture("quote-sol-usdc-raydium.json") }) });
-    // ladder may only use the half of the bucket above the reserve
-    await c.quote({ ...baseReq, priority: "ladder" }, null, "jupiter");
+    // bursts inside the window are fine: all legs of a route can be quoted at once
+    for (let i = 0; i < 13; i++) await c.quote({ ...baseReq, priority: "ladder" }, null, "jupiter");
+    // ladder quotes may only use half of the window
     await expect(c.quote({ ...baseReq, priority: "ladder" }, null, "jupiter")).rejects.toBeInstanceOf(QuoteBudgetExhaustedError);
-    // the final check still gets through
-    await c.quote({ ...baseReq, priority: "final" }, null, "jupiter");
+    // money-protecting checks still get through
+    for (let i = 0; i < 14; i++) await c.quote({ ...baseReq, priority: "final" }, null, "jupiter");
     await expect(c.quote({ ...baseReq, priority: "final" }, null, "jupiter")).rejects.toBeInstanceOf(QuoteBudgetExhaustedError);
-    t += 2_000;
-    await c.quote({ ...baseReq, priority: "final" }, null, "jupiter");
+    expect(budget.usage()).toEqual({ used1m: 27, limit1m: 27 });
+    t += 60_001;
+    await c.quote({ ...baseReq, priority: "ladder" }, null, "jupiter");
   });
 
   it("builds swap instructions with an overridden slippage and verifies the encoded minimum", async () => {
@@ -143,6 +145,25 @@ describe("JupiterClient", () => {
     const c2 = new JupiterClient({ baseUrl: "https://x.test", rps: 10, log, fetchImpl: fakeFetch({ "/quote": () => fixture("quote-sol-usdc-raydium.json"), "/swap-instructions": () => bad }) });
     const q2 = await c2.quote(baseReq, null, "jupiter");
     await expect(c2.swapInstructions({ quote: q2, userPublicKey: USER, wrapAndUnwrapSol: true })).rejects.toThrow(/unexpected swap program/);
+  });
+
+  it("token-ledger leg: sells exactly what the previous leg delivered, minimum output still verified", async () => {
+    const calls: { url: URL; body: unknown }[] = [];
+    const c = new JupiterClient({
+      baseUrl: "https://x.test",
+      rps: 10,
+      log,
+      fetchImpl: fakeFetch({ "/quote": () => fixture("quote-usdc-sol-whirlpool-10bps.json"), "/swap-instructions": () => fixture("swapix-usdc-sol-whirlpool-ledger.json") }, calls),
+    });
+    const q = await c.quote({ ...baseReq, inputMint: USDC_MINT, outputMint: SOL_MINT, inputDecimals: 6, outputDecimals: 9, amount: 2_000_000n, slippageBps: 10 }, ["Whirlpool"], "orca");
+    const built = await c.swapInstructions({ quote: q, userPublicKey: USER, wrapAndUnwrapSol: true, useTokenLedger: true });
+    expect((calls[1]?.body as { useTokenLedger?: boolean }).useTokenLedger).toBe(true);
+    expect(built.tokenLedger?.programId).toBe("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4");
+    expect(built.minOutputAmount).toBe(minOutForSlippage(16_406_947n, 10));
+    const args = decodeRouteArgs(built.swap.data);
+    expect(args).toMatchObject({ instruction: "route_with_token_ledger", tokenLedger: true, inAmount: null, quotedOutAmount: 16_406_947n, slippageBps: 10 });
+    // a fixed-input build must not be accepted where a ledger route was requested (and vice versa)
+    await expect(c.swapInstructions({ quote: q, userPublicKey: USER, wrapAndUnwrapSol: true })).rejects.toThrow(/fixed-input/);
   });
 
   it("opens its circuit after repeated outages and reports unavailable", async () => {

@@ -92,6 +92,9 @@ importers:
       '@solarbiter/dex':
         specifier: workspace:*
         version: link:../dex
+      '@solarbiter/profit-engine':
+        specifier: workspace:*
+        version: link:../profit-engine
       '@solarbiter/quotes':
         specifier: workspace:*
         version: link:../quotes

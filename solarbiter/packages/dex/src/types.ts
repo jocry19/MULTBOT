@@ -31,6 +31,11 @@ export interface WireInstruction {
 }
 
 export interface SwapInstructions {
+  /**
+   * Token-ledger variant only: records the input token balance. Must run BEFORE the instruction that
+   * delivers the input (the previous leg); the swap then sells exactly the balance increase.
+   */
+  tokenLedger: WireInstruction | null;
   computeBudget: WireInstruction[];
   setup: WireInstruction[];
   swap: WireInstruction;
@@ -49,6 +54,11 @@ export interface BuildSwapRequest {
   /** Override the slippage tolerance (bps) that the swap instruction enforces. */
   slippageBps?: number;
   wrapAndUnwrapSol: boolean;
+  /**
+   * Sell exactly what the previous leg delivered (Jupiter token ledger) instead of a fixed amount:
+   * no leftover token dust. The minimum output stays absolute.
+   */
+  useTokenLedger?: boolean;
   maxWaitMs?: number;
 }
 

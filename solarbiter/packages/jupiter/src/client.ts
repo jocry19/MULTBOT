@@ -4,7 +4,7 @@ import { QuoteBudget, newQuoteId } from "@solarbiter/quotes";
 import { rawToUi, type DexId, type Quote, type RouteHop } from "@solarbiter/shared";
 import { CircuitBreaker, IntegrityError, PermanentError, TransientError, metrics } from "@solarbiter/shared/node";
 import type { Logger } from "pino";
-import { JUPITER_PROGRAM_ID, decodeRouteArgs, minOutForSlippage } from "./instruction.js";
+import { JUPITER_PROGRAM_ID, SET_TOKEN_LEDGER_DISCRIMINATOR, decodeRouteArgs, minOutForSlippage } from "./instruction.js";
 import { dexForLabel } from "./labels.js";
 
 /** Quote response of GET /quote (only the fields SOLARBITER relies on are typed). */
@@ -34,6 +34,7 @@ interface WireIx {
 }
 
 interface JupiterSwapInstructionsResponse {
+  tokenLedgerInstruction?: WireIx | null;
   computeBudgetInstructions?: WireIx[];
   setupInstructions?: WireIx[];
   swapInstruction: WireIx;
@@ -89,7 +90,7 @@ export class JupiterClient {
 
   constructor(private readonly opts: JupiterClientOptions) {
     this.now = opts.now ?? Date.now;
-    this.budget = opts.budget ?? new QuoteBudget(opts.rps, undefined, this.now);
+    this.budget = opts.budget ?? new QuoteBudget(opts.rps, this.now);
     this.breaker = new CircuitBreaker(5, 30_000, this.now);
     // Keyed plans are served from api.jup.ag, keyless from lite-api.jup.ag.
     let base = opts.baseUrl.replace(/\/+$/, "");
@@ -176,6 +177,7 @@ export class JupiterClient {
       wrapAndUnwrapSol: req.wrapAndUnwrapSol,
       dynamicComputeUnitLimit: false,
       dynamicSlippage: false,
+      ...(req.useTokenLedger ? { useTokenLedger: true } : {}),
     };
     const { value } = await this.call("final", req.maxWaitMs ?? 3_000, () =>
       fetchJson<JupiterSwapInstructionsResponse>(`${this.baseUrl}/swap-instructions`, {
@@ -186,7 +188,7 @@ export class JupiterClient {
         fetchImpl: this.opts.fetchImpl,
       }),
     );
-    return verifySwapInstructions(value, req.quote, slippageBps);
+    return verifySwapInstructions(value, req.quote, slippageBps, req.useTokenLedger === true);
   }
 }
 
@@ -244,17 +246,28 @@ export function mapQuote(r: JupiterQuoteResponse, req: QuoteRequest, source: Dex
  * The instructions must be the Jupiter program, and the route arguments must encode exactly the quoted
  * input, the quoted output and the requested slippage. Anything else is refused.
  */
-export function verifySwapInstructions(r: JupiterSwapInstructionsResponse, quote: Quote, slippageBps: number): SwapInstructions {
+export function verifySwapInstructions(r: JupiterSwapInstructionsResponse, quote: Quote, slippageBps: number, tokenLedger = false): SwapInstructions {
   if (!r.swapInstruction) throw new IntegrityError("SWAP_BUILD_INVALID", "no swap instruction returned");
   if (r.simulationError) throw new PermanentError("SWAP_SIMULATION_ERROR", `swap-instructions reported a simulation error: ${JSON.stringify(r.simulationError).slice(0, 200)}`);
   if (r.swapInstruction.programId !== JUPITER_PROGRAM_ID) throw new IntegrityError("SWAP_BUILD_INVALID", `unexpected swap program ${r.swapInstruction.programId}`);
   const args = decodeRouteArgs(r.swapInstruction.data);
   if (!args) throw new IntegrityError("SWAP_BUILD_INVALID", "unknown swap instruction layout (cannot verify minimum output)");
-  if (args.inAmount !== quote.inputAmount) throw new IntegrityError("SWAP_BUILD_INVALID", `instruction input ${args.inAmount} ≠ quoted ${quote.inputAmount}`);
+  if (args.tokenLedger !== tokenLedger) throw new IntegrityError("SWAP_BUILD_INVALID", `expected a ${tokenLedger ? "token-ledger" : "fixed-input"} route, got ${args.instruction}`);
+  let ledgerIx: WireInstruction | null = null;
+  if (tokenLedger) {
+    const l = r.tokenLedgerInstruction;
+    if (!l || l.programId !== JUPITER_PROGRAM_ID || Buffer.from(l.data, "base64").subarray(0, 8).toString("hex") !== SET_TOKEN_LEDGER_DISCRIMINATOR) {
+      throw new IntegrityError("SWAP_BUILD_INVALID", "token-ledger route without a valid set_token_ledger instruction");
+    }
+    ledgerIx = toWire(l);
+  } else if (args.inAmount !== quote.inputAmount) {
+    throw new IntegrityError("SWAP_BUILD_INVALID", `instruction input ${args.inAmount} ≠ quoted ${quote.inputAmount}`);
+  }
   if (args.quotedOutAmount !== quote.outputAmount) throw new IntegrityError("SWAP_BUILD_INVALID", `instruction quoted output ${args.quotedOutAmount} ≠ quote ${quote.outputAmount}`);
   if (args.slippageBps !== slippageBps) throw new IntegrityError("SWAP_BUILD_INVALID", `instruction slippage ${args.slippageBps} ≠ requested ${slippageBps}`);
   if (args.platformFeeBps !== 0) throw new IntegrityError("SWAP_BUILD_INVALID", `unexpected platform fee ${args.platformFeeBps} bps`);
   return {
+    tokenLedger: ledgerIx,
     computeBudget: (r.computeBudgetInstructions ?? []).map(toWire),
     setup: (r.setupInstructions ?? []).map(toWire),
     swap: toWire(r.swapInstruction),

@@ -16,6 +16,11 @@
       "source": "./src/node/index.ts",
       "types": "./dist/node/index.d.ts",
       "default": "./dist/node/index.js"
+    },
+    "./testing": {
+      "source": "./src/testing.ts",
+      "types": "./dist/testing.d.ts",
+      "default": "./dist/testing.js"
     }
   },
   "scripts": {

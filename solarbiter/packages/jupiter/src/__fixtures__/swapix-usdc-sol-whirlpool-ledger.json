@@ -1,0 +1,184 @@
+{
+ "tokenLedgerInstruction": {
+  "programId": "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+  "accounts": [
+   {
+    "pubkey": "FhLPkpFmszHtSyyayj7KsXNZeBTqfQbUPmvgWAyJHBXh",
+    "isSigner": false,
+    "isWritable": true
+   },
+   {
+    "pubkey": "FGETo8T8wMcN2wCjav8VK6eh3dLk63evNDPxzLSJra8B",
+    "isSigner": false,
+    "isWritable": false
+   }
+  ],
+  "data": "5FW5cE5PTQI="
+ },
+ "computeBudgetInstructions": [
+  {
+   "programId": "ComputeBudget111111111111111111111111111111",
+   "accounts": [],
+   "data": "AsBcFQA="
+  }
+ ],
+ "setupInstructions": [],
+ "swapInstruction": {
+  "programId": "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+  "accounts": [
+   {
+    "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "isSigner": false,
+    "isWritable": false
+   },
+   {
+    "pubkey": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+    "isSigner": true,
+    "isWritable": false
+   },
+   {
+    "pubkey": "FGETo8T8wMcN2wCjav8VK6eh3dLk63evNDPxzLSJra8B",
+    "isSigner": false,
+    "isWritable": true
+   },
+   {
+    "pubkey": "8LjUgMjzZuHj8VdyxzkmLLQVmW4C3gd56md1nLd76TNW",
+    "isSigner": false,
+    "isWritable": true
+   },
+   {
+    "pubkey": "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+    "isSigner": false,
+    "isWritable": false
+   },
+   {
+    "pubkey": "So11111111111111111111111111111111111111112",
+    "isSigner": false,
+    "isWritable": false
+   },
+   {
+    "pubkey": "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+    "isSigner": false,
+    "isWritable": false
+   },
+   {
+    "pubkey": "FhLPkpFmszHtSyyayj7KsXNZeBTqfQbUPmvgWAyJHBXh",
+    "isSigner": false,
+    "isWritable": false
+   },
+   {
+    "pubkey": "D8cy77BBepLMngZx6ZukaTff5hCt1HrWyKk3Hnd9oitf",
+    "isSigner": false,
+    "isWritable": false
+   },
+   {
+    "pubkey": "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+    "isSigner": false,
+    "isWritable": false
+   },
+   {
+    "pubkey": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+    "isSigner": false,
+    "isWritable": false
+   },
+   {
+    "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "isSigner": false,
+    "isWritable": false
+   },
+   {
+    "pubkey": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+    "isSigner": false,
+    "isWritable": false
+   },
+   {
+    "pubkey": "83v8iPyZihDEjDdY8RdZddyZNyUtXngz69Lgo9Kt5d6d",
+    "isSigner": false,
+    "isWritable": true
+   },
+   {
+    "pubkey": "8LjUgMjzZuHj8VdyxzkmLLQVmW4C3gd56md1nLd76TNW",
+    "isSigner": false,
+    "isWritable": true
+   },
+   {
+    "pubkey": "D3CDPQLoa9jY1LXCkpUqd3JQDWz8DX1LDE1dhmJt9fq4",
+    "isSigner": false,
+    "isWritable": true
+   },
+   {
+    "pubkey": "FGETo8T8wMcN2wCjav8VK6eh3dLk63evNDPxzLSJra8B",
+    "isSigner": false,
+    "isWritable": true
+   },
+   {
+    "pubkey": "dwxR9YF7WwnJJu7bPC4UNcWFpcSsooH6fxbpoa3fTbJ",
+    "isSigner": false,
+    "isWritable": true
+   },
+   {
+    "pubkey": "98sTPe4Z72C8NgXrkjwNB7cs9GVM5QfeDcudNNF1kG9c",
+    "isSigner": false,
+    "isWritable": true
+   },
+   {
+    "pubkey": "BurHtB44sfdvLU6jNqgGAKZoLArc4ib9Qj6jVe6XUABB",
+    "isSigner": false,
+    "isWritable": true
+   },
+   {
+    "pubkey": "EDzteUSeFpRTZicKP72ksvaNshv28gs3FLk1BDrN4tZs",
+    "isSigner": false,
+    "isWritable": true
+   },
+   {
+    "pubkey": "GwRSc3EPw2fCLJN7zWwcApXgHSrfmj9m4H5sfk1W2SUJ",
+    "isSigner": false,
+    "isWritable": false
+   }
+  ],
+  "data": "llZHdKddDmgBAAAAEQBkAAGjWfoAAAAAAAoAAA=="
+ },
+ "cleanupInstruction": {
+  "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+  "accounts": [
+   {
+    "pubkey": "8LjUgMjzZuHj8VdyxzkmLLQVmW4C3gd56md1nLd76TNW",
+    "isSigner": false,
+    "isWritable": true
+   },
+   {
+    "pubkey": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+    "isSigner": false,
+    "isWritable": true
+   },
+   {
+    "pubkey": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+    "isSigner": true,
+    "isWritable": false
+   }
+  ],
+  "data": "CQ=="
+ },
+ "otherInstructions": [],
+ "addressLookupTableAddresses": [
+  "9AsimPML6N36BAe8keQRAHpLuKgCKv9QJV9912TXZhBD"
+ ],
+ "prioritizationFeeLamports": 0,
+ "computeUnitLimit": 1400000,
+ "loadedAccountsDataSize": null,
+ "loadedAccountsDataSizeLimit": null,
+ "transactionVersion": 0,
+ "prioritizationType": {
+  "computeBudget": {
+   "microLamports": 0,
+   "estimatedMicroLamports": 0
+  }
+ },
+ "simulationSlot": null,
+ "dynamicSlippageReport": null,
+ "simulationError": null,
+ "addressesByLookupTableAddress": null,
+ "timeTaken": 0.046562671,
+ "createAtaTimeTaken": 0.024276873
+}
