@@ -70,6 +70,72 @@ export class StrategyMonitor {
         this.log.error({ err, strategy: s.id }, "strategy monitoring failed");
       }
     }
+    try {
+      await this.evaluateChallengers();
+    } catch (err) {
+      this.log.error({ err }, "challenger evaluation failed");
+    }
+  }
+
+  /**
+   * Challenger versions vs. the current version on the SAME live paper period.
+   *  - better (Welch p < 0.1, positive mean): promoted — unless the strategy trades real money, then
+   *    it is only recommended and the user decides (Strategy Lab → Versionen → aktivieren)
+   *  - significantly worse, or no advantage after 3× the minimum trades: retired
+   */
+  async evaluateChallengers(): Promise<void> {
+    const minTrades = this.settings().research.challengerMinTrades;
+    const active: StrategyStatus[] = ["PAPER_TRADING", "PAPER_VALIDATED", "LIVE_ENABLED", "DEGRADED"];
+    for (const c of await this.strategies.challengers("PAPER_TRADING")) {
+      if (!active.includes(c.strategy_status) || !c.current_version_id) {
+        await this.strategies.updateChallenger(c.id, { status: "REJECTED", outcome: "retired", reason: `strategy is ${c.strategy_status}` });
+        continue;
+      }
+      const since = c.challenger_since ? new Date(c.challenger_since) : new Date(0);
+      const q = `SELECT net_pnl_sol FROM paper_trades WHERE strategy_version_id = $1 AND status IN ('CLOSED', 'FAILED')
+                   AND net_pnl_sol IS NOT NULL AND decision_ts >= $2 ORDER BY closed_at`;
+      const ch = (await this.db.many<{ net_pnl_sol: number }>(q, [c.id, since])).map((r) => r.net_pnl_sol);
+      if (ch.length < minTrades) continue;
+      const inc = (await this.db.many<{ net_pnl_sol: number }>(q, [c.current_version_id, since])).map((r) => r.net_pnl_sol);
+      const pc = performance(ch);
+      const pi = performance(inc);
+      const pBetter = inc.length >= 2 ? welchGreater(ch, inc).pValue : pc.pValue;
+      const pWorse = inc.length >= 2 ? welchGreater(inc, ch).pValue : 1;
+      await this.strategies.addResult(this.db, c.id, "challenger", {
+        since: since.toISOString(),
+        challenger: pc,
+        incumbent: { versionId: c.current_version_id, ...pi },
+        pBetter,
+        pWorse,
+        updatedAt: new Date().toISOString(),
+      });
+      const detail = `${c.version}: ${pc.mean.toFixed(5)} vs ${pi.mean.toFixed(5)} SOL/Trade (${pc.n} vs ${pi.n} Trades, p=${pBetter.toFixed(3)})`;
+      if (pc.mean > 0 && pc.mean > pi.mean && pBetter < 0.1) {
+        if (c.strategy_status === "LIVE_ENABLED") {
+          if (c.challenger_outcome !== "recommended") {
+            await this.strategies.updateChallenger(c.id, { outcome: "recommended", reason: `outperformed the live version in paper trading — ${detail}` });
+            this.notify.activity("warning", "strategy", `${c.strategy_id} version ${c.version} outperformed the live version in paper trading. Review and activate it manually if you agree — live trading is unchanged.`, {
+              strategyId: c.strategy_id,
+              versionId: c.id,
+            });
+          }
+        } else {
+          const prev = c.strategy_status;
+          await this.strategies.setCurrentVersion(c.strategy_id, c.id, "system", `version ${c.version} promoted after paper comparison — ${detail}`);
+          if (prev === "PAPER_VALIDATED" || prev === "DEGRADED") {
+            await this.strategies.transition(c.strategy_id, "PAPER_TRADING", `re-validation of promoted version ${c.version}`, "system");
+          }
+          this.notify.activity("success", "strategy", `${c.strategy_id}: version ${c.version} replaced the current version (paper comparison, ${detail})`, {
+            strategyId: c.strategy_id,
+            versionId: c.id,
+          });
+        }
+      } else if (pWorse < 0.1 || ch.length >= 3 * minTrades) {
+        const reason = pWorse < 0.1 ? `significantly worse than the current version — ${detail}` : `no advantage after ${ch.length} trades — ${detail}`;
+        await this.strategies.updateChallenger(c.id, { status: "REJECTED", outcome: "retired", reason });
+        this.notify.activity("info", "strategy", `${c.strategy_id}: challenger ${c.version} retired (${reason})`, { strategyId: c.strategy_id, versionId: c.id });
+      }
+    }
   }
 
   async evaluate(strategyId: string, status: StrategyStatus, versionId: string): Promise<void> {

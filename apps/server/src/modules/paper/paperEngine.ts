@@ -5,6 +5,7 @@ import type { TypedBus } from "../../core/bus.js";
 import type { Clock } from "../../core/clock.js";
 import { idempotencyKey } from "../../core/hash.js";
 import { metrics } from "../../core/metrics.js";
+import { calibratedExpectation } from "../learning/learningEngine.js";
 import { BaseModule } from "../../core/module.js";
 import type { Database } from "../../db/database.js";
 import type { BusEvents, DecisionPoint, PriceUpdate } from "../../app/busEvents.js";
@@ -96,14 +97,20 @@ export class PaperEngine extends BaseModule {
     const next: ActiveVersion[] = [];
     for (const { strategy, version } of rows) {
       const discovery = await this.strategies.latestResult(version.id, "discovery");
+      const evolution = await this.strategies.latestResult(version.id, "evolution");
       const val = (discovery?.validation as { mean?: number } | undefined)?.mean;
       const hold = (discovery?.holdout as { mean?: number } | undefined)?.mean;
+      const evolved = (evolution?.candidate as { holdout?: { mean?: number } } | undefined)?.holdout?.mean;
       const regimes = (discovery?.regimes as { label: string; n: number; mean: number }[] | undefined) ?? null;
+      // prior from research, continuously calibrated with what this version actually realised in paper trading
+      const learned = await this.db.one<{ value: { calibratedExpectation?: number | null; trades?: number } }>("SELECT value FROM learning_state WHERE key = $1", [
+        `strategy:${version.id}:paper`,
+      ]);
       next.push({
         strategyId: strategy.id,
         status: strategy.status,
         version,
-        expectedNetReturn: hold ?? val ?? null,
+        expectedNetReturn: calibratedExpectation(hold ?? val ?? evolved ?? null, learned?.value.calibratedExpectation ?? null, learned?.value.trades ?? 0),
         goodRegimes: regimes ? new Set(regimes.filter((r) => r.n >= 10 && r.mean > 0).map((r) => r.label)) : null,
       });
     }

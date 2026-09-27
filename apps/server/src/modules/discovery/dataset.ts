@@ -35,6 +35,8 @@ export class Dataset {
   readonly n: number;
   readonly ids: Float64Array;
   readonly ts: Float64Array;
+  /** Token age at the decision point (seconds). */
+  readonly ageSec: Float64Array;
   readonly mintIdx: Int32Array;
   readonly mints: string[];
   readonly venues: string[];
@@ -50,6 +52,7 @@ export class Dataset {
     this.n = rows.length;
     this.ids = new Float64Array(this.n);
     this.ts = new Float64Array(this.n);
+    this.ageSec = new Float64Array(this.n);
     this.mintIdx = new Int32Array(this.n);
     this.mints = [];
     this.venues = [];
@@ -65,6 +68,7 @@ export class Dataset {
     rows.forEach((r, i) => {
       this.ids[i] = r.id;
       this.ts[i] = r.ts;
+      this.ageSec[i] = r.ageSec;
       let mi = mintMap.get(r.mint);
       if (mi === undefined) {
         mi = this.mints.length;

@@ -66,6 +66,9 @@ export type VersionRow = {
   change_summary: string | null;
   status: StrategyStatus;
   created_at: Date;
+  challenger_since: Date | null;
+  challenger_outcome: string | null;
+  challenger_reason: string | null;
 };
 
 export function specHash(spec: StrategySpec): string {
@@ -115,7 +118,11 @@ export class StrategyService {
   async activeForPaper(): Promise<{ strategy: StrategyRow; version: VersionRow }[]> {
     const rows = await this.db.many<StrategyRow & { v: VersionRow }>(
       `SELECT s.*, row_to_json(v.*) AS v FROM strategies s JOIN strategy_versions v ON v.id = s.current_version_id
-        WHERE s.paper_enabled AND s.status IN ('PAPER_TRADING', 'PAPER_VALIDATED', 'LIVE_ENABLED', 'DEGRADED')`,
+        WHERE s.paper_enabled AND s.status IN ('PAPER_TRADING', 'PAPER_VALIDATED', 'LIVE_ENABLED', 'DEGRADED')
+       UNION ALL
+       SELECT s.*, row_to_json(v.*) AS v FROM strategies s JOIN strategy_versions v ON v.strategy_id = s.id
+        WHERE v.challenger_since IS NOT NULL AND v.status = 'PAPER_TRADING' AND v.id <> s.current_version_id
+          AND s.paper_enabled AND s.status IN ('PAPER_TRADING', 'PAPER_VALIDATED', 'LIVE_ENABLED', 'DEGRADED')`,
     );
     return rows.map((r) => ({ strategy: r, version: r.v }));
   }
@@ -241,17 +248,91 @@ export class StrategyService {
     await this.db.query("UPDATE strategies SET paper_enabled = $2 WHERE id = $1", [id, enabled]);
   }
 
-  /** Point the strategy at another version (evolution). Keeps old versions untouched. */
-  async setCurrentVersion(id: string, versionId: string, actor: Actor): Promise<void> {
+  /**
+   * Point the strategy at another version (evolution). Old versions stay untouched (immutable specs).
+   * The system may only do this for strategies that are not live-enabled — changing what trades real
+   * money is a user decision.
+   */
+  async setCurrentVersion(id: string, versionId: string, actor: Actor, reason = "current version changed"): Promise<void> {
     const v = await this.version(versionId);
     if (!v || v.strategy_id !== id) throw new PermanentError("VERSION", "version does not belong to strategy");
+    const s = await this.get(id);
+    if (!s) throw new PermanentError("STRATEGY_NOT_FOUND", `strategy ${id} not found`);
+    if (actor !== "user" && s.status === "LIVE_ENABLED") {
+      throw new PermanentError("STRATEGY_LIVE", "the version of a live-enabled strategy can only be changed by the user");
+    }
     await this.db.tx(async (c) => {
+      if (s.current_version_id && s.current_version_id !== versionId) {
+        await c.query("UPDATE strategy_versions SET status = 'PAUSED' WHERE id = $1", [s.current_version_id]);
+      }
       await c.query("UPDATE strategies SET current_version_id = $2 WHERE id = $1", [id, versionId]);
       await c.query(
-        "INSERT INTO strategy_status_history (strategy_id, version_id, from_status, to_status, reason, actor) SELECT id, $2, status, status, 'current version changed', $3 FROM strategies WHERE id = $1",
-        [id, versionId, actor],
+        `UPDATE strategy_versions SET status = $2, challenger_since = NULL,
+           challenger_outcome = CASE WHEN challenger_since IS NOT NULL THEN 'promoted' ELSE challenger_outcome END WHERE id = $1`,
+        [versionId, s.status],
+      );
+      await c.query(
+        "INSERT INTO strategy_status_history (strategy_id, version_id, from_status, to_status, reason, actor) VALUES ($1, $2, $3, $3, $4, $5)",
+        [id, versionId, s.status, reason, actor],
       );
     });
+    for (const l of this.listeners) l(id, s.status);
+  }
+
+  /**
+   * Register an evolved variant as a challenger version (1.x → 1.x+1 for parameter changes,
+   * x.y → x+1.0 for structural changes). Returns null if an identical spec already exists.
+   */
+  async createChallenger(opts: {
+    strategyId: string;
+    parentVersionId: string;
+    spec: StrategySpec;
+    bump: "minor" | "major";
+    changeSummary: string;
+    evidence: Record<string, unknown>;
+  }): Promise<{ versionId: string; version: string } | null> {
+    const spec = strategySpecSchema.parse(opts.spec);
+    const hash = specHash(spec);
+    if (await this.db.one("SELECT 1 FROM strategy_versions WHERE spec_hash = $1", [hash])) return null;
+    const parent = await this.version(opts.parentVersionId);
+    if (!parent || parent.strategy_id !== opts.strategyId) throw new PermanentError("VERSION", "parent version does not belong to strategy");
+    return this.db.tx(async (c) => {
+      const agg = await c.query<{ major: number; minor: number }>(
+        "SELECT max(major)::int AS major, COALESCE(max(minor) FILTER (WHERE major = $2), 0)::int AS minor FROM strategy_versions WHERE strategy_id = $1",
+        [opts.strategyId, parent.major],
+      );
+      const maxMajor = agg.rows[0]?.major ?? parent.major;
+      const [major, minor] = opts.bump === "major" ? [maxMajor + 1, 0] : [parent.major, (agg.rows[0]?.minor ?? parent.minor) + 1];
+      const version = `${major}.${minor}`;
+      const versionId = `${opts.strategyId}@${version}`;
+      await c.query(
+        `INSERT INTO strategy_versions (id, strategy_id, version, major, minor, spec, spec_hash, parent_version_id, change_summary, status, challenger_since)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'TESTING', now())`,
+        [versionId, opts.strategyId, version, major, minor, JSON.stringify(spec), hash, parent.id, opts.changeSummary.slice(0, 500)],
+      );
+      await this.addResult(c, versionId, "evolution", opts.evidence);
+      return { versionId, version };
+    });
+  }
+
+  /** Versions currently running (or queued) as challengers. */
+  async challengers(status?: StrategyStatus): Promise<(VersionRow & { strategy_status: StrategyStatus; current_version_id: string | null })[]> {
+    return this.db.many(
+      `SELECT v.*, s.status AS strategy_status, s.current_version_id FROM strategy_versions v JOIN strategies s ON s.id = v.strategy_id
+        WHERE v.challenger_since IS NOT NULL ${status ? "AND v.status = $1" : ""} ORDER BY v.challenger_since`,
+      status ? [status] : [],
+    );
+  }
+
+  /** Update a challenger's state; `outcome` ends the challenge (retired / recommended keeps it running). */
+  async updateChallenger(versionId: string, patch: { status?: StrategyStatus; outcome?: "retired" | "recommended"; reason?: string }): Promise<void> {
+    const end = patch.outcome === "retired";
+    await this.db.query(
+      `UPDATE strategy_versions SET status = COALESCE($2, status), challenger_outcome = COALESCE($3, challenger_outcome),
+         challenger_reason = COALESCE($4, challenger_reason), challenger_since = CASE WHEN $5 THEN NULL ELSE challenger_since END WHERE id = $1`,
+      [versionId, patch.status ?? null, patch.outcome ?? null, patch.reason ?? null, end],
+    );
+    for (const l of this.listeners) l(versionId.split("@")[0] as string, (patch.status ?? "PAPER_TRADING") as StrategyStatus);
   }
 
   async history(id: string): Promise<Record<string, unknown>[]> {

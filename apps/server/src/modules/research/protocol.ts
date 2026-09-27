@@ -3,7 +3,7 @@ import type { ModuleHealth } from "../../core/module.js";
 
 /** Messages between the main thread and the research worker. */
 
-export type ResearchMethod = "runDiscovery" | "runBacktest" | "analogues" | "labelNow" | "clusters" | "monitorNow" | "learnNow";
+export type ResearchMethod = "runDiscovery" | "runBacktest" | "analogues" | "labelNow" | "clusters" | "monitorNow" | "learnNow" | "runEvolution";
 
 export type ToWorker =
   | { type: "settings"; settings: Settings }

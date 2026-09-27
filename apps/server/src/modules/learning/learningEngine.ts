@@ -45,6 +45,16 @@ export interface Assessment {
   attribution: Record<string, number | string | null>;
 }
 
+/**
+ * Continuous learning of expectations: the research estimate (prior) is shrunk towards the net return
+ * actually realised in paper/live trading, weighting the prior like `k` observations.
+ */
+export function calibratedExpectation(prior: number | null, realised: number | null, n: number, k = 50): number | null {
+  if (realised === null || n <= 0) return prior;
+  if (prior === null) return n >= 20 ? realised : null;
+  return (k * prior + n * realised) / (k + n);
+}
+
 export function assessTrade(t: TradeRow): Assessment | null {
   if (t.net_return === null) return null;
   const expected = t.expected ?? {};

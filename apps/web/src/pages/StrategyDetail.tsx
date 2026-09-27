@@ -34,6 +34,9 @@ interface StrategyDetail {
     parent_version_id: string | null;
     created_at: string;
     description: string[];
+    challenger_since: string | null;
+    challenger_outcome: string | null;
+    challenger_reason: string | null;
   }[];
   results: { id: number; strategy_version_id: string; kind: string; computed_at: string; metrics: Record<string, unknown> }[];
   backtests: {
@@ -321,6 +324,12 @@ export function StrategyDetailPage() {
             )}
           </Card>
 
+          {d.versions
+            .filter((v) => v.challenger_since || v.challenger_outcome === "recommended")
+            .map((v) => (
+              <ChallengerCard key={v.id} version={v} results={d.results} liveEnabled={s.status === "LIVE_ENABLED"} onActivate={() => act(`v-${v.id}`, `/api/strategies/${s.id}/versions/${encodeURIComponent(v.id)}/activate`)} />
+            ))}
+
           <Card dense title="Versionen" subtitle="Strategie-Evolution">
             <Table
               rows={d.versions}
@@ -329,6 +338,20 @@ export function StrategyDetailPage() {
               columns={[
                 { key: "v", header: "Version", cell: (v) => <span className="num">{v.version}</span> },
                 { key: "c", header: "Änderung", cell: (v) => <span className="block max-w-[180px] truncate text-ink-2" title={v.change_summary ?? ""}>{v.change_summary ?? "—"}</span> },
+                {
+                  key: "s",
+                  header: "Rolle",
+                  cell: (v) =>
+                    v.id === s.current_version_id ? (
+                      <span className="text-ink-2">aktuell</span>
+                    ) : v.challenger_outcome === "recommended" ? (
+                      <Badge status="PAPER_VALIDATED">empfohlen</Badge>
+                    ) : v.challenger_since ? (
+                      <Badge status="TESTING">Herausforderer · {v.status === "TESTING" ? "Backtest" : "Paper"}</Badge>
+                    ) : (
+                      <span className="text-muted" title={v.challenger_reason ?? ""}>{v.challenger_outcome ?? "—"}</span>
+                    ),
+                },
                 { key: "t", header: "Erstellt", cell: (v) => <span className="num text-muted">{dateTime(v.created_at)}</span> },
                 {
                   key: "a",
@@ -553,5 +576,75 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
       <div className="mb-2 text-[11px] font-medium text-ink-2">{title}</div>
       {children}
     </div>
+  );
+}
+
+interface Split {
+  n: number;
+  mean: number;
+  median: number;
+  winRate: number;
+}
+
+function ChallengerCard({
+  version,
+  results,
+  liveEnabled,
+  onActivate,
+}: {
+  version: StrategyDetail["versions"][number];
+  results: StrategyDetail["results"];
+  liveEnabled: boolean;
+  onActivate: () => void;
+}) {
+  const evo = results.find((r) => r.strategy_version_id === version.id && r.kind === "evolution")?.metrics as
+    | { parent?: { train: Split; holdout: Split }; candidate?: { train: Split; holdout: Split }; variantsTried?: number; holdoutPValue?: number; variant?: { summary: string } }
+    | undefined;
+  const cmp = results.find((r) => r.strategy_version_id === version.id && r.kind === "challenger")?.metrics as
+    | { challenger: Perf; incumbent: Perf & { versionId: string }; pBetter: number; since: string }
+    | undefined;
+  return (
+    <Card title={`Herausforderer v${version.version}`} subtitle={evo?.variant?.summary ?? version.change_summary ?? ""}>
+      <div className="space-y-3 text-[12px]">
+        {evo?.parent && evo.candidate && (
+          <div>
+            <div className="mb-1 text-[11px] text-muted">Research (Ø netto je Trade; Auswahl auf Training, Bestätigung auf Holdout · {evo.variantsTried ?? "?"} Varianten geprüft)</div>
+            <KV
+              cols={1}
+              items={[
+                ["Training: aktuell → neu", `${pct(evo.parent.train.mean)} → ${pct(evo.candidate.train.mean)}`],
+                ["Holdout: aktuell → neu", `${pct(evo.parent.holdout.mean)} → ${pct(evo.candidate.holdout.mean)} (n=${evo.candidate.holdout.n})`],
+              ]}
+            />
+          </div>
+        )}
+        {cmp ? (
+          <div>
+            <div className="mb-1 text-[11px] text-muted">Paper-Vergleich seit {dateTime(cmp.since)}</div>
+            <KV
+              cols={1}
+              items={[
+                ["Neu", <span key="n"><Pnl value={cmp.challenger.mean} digits={5} /> · {cmp.challenger.n} Trades</span>],
+                ["Aktuell", <span key="a"><Pnl value={cmp.incumbent.mean} digits={5} /> · {cmp.incumbent.n} Trades</span>],
+                ["p (neu besser)", cmp.pBetter.toPrecision(2)],
+              ]}
+            />
+          </div>
+        ) : (
+          <div className="text-ink-2">{version.status === "TESTING" ? "Wartet auf den Backtest." : "Sammelt Paper Trades für den Vergleich."}</div>
+        )}
+        {version.challenger_outcome === "recommended" && (
+          <div className="space-y-2">
+            <Notice tone="warn">
+              Diese Version war im Paper Trading besser als die {liveEnabled ? "live gehandelte" : "aktuelle"} Version. Echtgeld-Strategien werden nie automatisch umgestellt — die
+              Entscheidung liegt bei dir.
+            </Notice>
+            <Button variant="primary" onClick={onActivate}>
+              Version {version.version} aktivieren
+            </Button>
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }

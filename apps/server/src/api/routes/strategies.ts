@@ -150,6 +150,26 @@ export async function registerStrategyRoutes(f: FastifyInstance, app: App, polic
     return { queued: true };
   });
 
+  // --- evolution ----------------------------------------------------------------------------
+  f.get("/api/evolution/runs", async () =>
+    app.db.many("SELECT id, started_at, finished_at, status, dataset, examined, proposed, summary, error FROM evolution_runs ORDER BY id DESC LIMIT 50"),
+  );
+  f.get("/api/evolution/challengers", async () =>
+    app.db.many(
+      `SELECT v.id, v.strategy_id, v.version, v.status, v.change_summary, v.challenger_since, v.challenger_outcome, v.challenger_reason, v.created_at,
+              s.name, s.status AS strategy_status, s.current_version_id,
+              (SELECT metrics FROM strategy_results r WHERE r.strategy_version_id = v.id AND r.kind = 'challenger' ORDER BY computed_at DESC LIMIT 1) AS comparison,
+              (SELECT metrics FROM strategy_results r WHERE r.strategy_version_id = v.id AND r.kind = 'evolution' ORDER BY computed_at DESC LIMIT 1) AS evidence
+         FROM strategy_versions v JOIN strategies s ON s.id = v.strategy_id
+        WHERE v.challenger_since IS NOT NULL OR v.challenger_outcome IS NOT NULL
+        ORDER BY v.created_at DESC LIMIT 200`,
+    ),
+  );
+  f.post("/api/evolution/run", async () => {
+    void app.research.request("runEvolution").catch((err) => app.activity.error("evolution", (err as Error).message));
+    return { queued: true };
+  });
+
   f.get("/api/backtests", async (req) => {
     const q = z.object({ strategyId: z.string().max(40).optional() }).parse(req.query);
     return app.db.many(

@@ -291,6 +291,12 @@ export function SettingsPage() {
             <Field label="Discovery-Intervall" hint="0 = nur manuell">
               <Num value={draft.research.discoveryIntervalMin} onChange={(v) => setS("discoveryIntervalMin", Math.round(v))} unit="min" />
             </Field>
+            <Field label="Evolutions-Intervall" hint="Suche nach besseren Varianten bestehender Strategien; 0 = aus">
+              <Num value={draft.research.evolutionIntervalMin} onChange={(v) => setS("evolutionIntervalMin", Math.round(v))} unit="min" />
+            </Field>
+            <Field label="Mindest-Trades für Herausforderer" hint="Paper Trades, bevor eine neue Version mit der aktuellen verglichen wird">
+              <Num value={draft.research.challengerMinTrades} onChange={(v) => setS("challengerMinTrades", Math.round(v))} unit="Trades" />
+            </Field>
             <Field label="Decay-Fenster">
               <Num value={draft.research.decayWindowTrades} onChange={(v) => setS("decayWindowTrades", Math.round(v))} unit="Trades" />
             </Field>

@@ -74,6 +74,10 @@ export const researchSettingsSchema = z.object({
   maxHypothesesPerRun: z.number().int().min(100).max(1_000_000),
   /** How often the discovery pipeline runs automatically (minutes). 0 = manual only. */
   discoveryIntervalMin: z.number().int().min(0).max(10_080),
+  /** How often existing strategies are searched for better variants (minutes). 0 = off. */
+  evolutionIntervalMin: z.number().int().min(0).max(10_080),
+  /** Closed paper trades a challenger version needs before it is compared with the current version. */
+  challengerMinTrades: z.number().int().min(10).max(10_000),
   /** Criteria for PAPER_VALIDATED (a recommendation only — never auto-enables live trading). */
   paperValidation: z.object({
     minTrades: z.number().int().min(10).max(100_000),
@@ -141,6 +145,8 @@ export const DEFAULT_SETTINGS: Settings = {
     maxConditionsPerRecipe: 3,
     maxHypothesesPerRun: 20_000,
     discoveryIntervalMin: 360,
+    evolutionIntervalMin: 720,
+    challengerMinTrades: 50,
     paperValidation: {
       minTrades: 100,
       minProfitFactor: 1.2,

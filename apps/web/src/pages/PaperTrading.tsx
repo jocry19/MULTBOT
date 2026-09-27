@@ -9,6 +9,9 @@ import { dateTime, pct, sol } from "../lib/format";
 
 export interface CompetitionRow {
   strategyId: string;
+  versionId: string;
+  current: boolean;
+  challenger: boolean;
   name: string;
   status: string;
   trades: number;
@@ -50,8 +53,10 @@ export function CompetitionTable({ rows }: { rows: CompetitionRow[] | undefined 
       key: "s",
       header: "Strategie",
       cell: (r) => (
-        <div>
-          <span className="num text-[11px] text-muted">{r.strategyId}</span> <span className="text-ink">{r.name}</span>
+        <div className="flex items-center gap-1.5">
+          <span className="num text-[11px] text-muted">{r.versionId}</span>
+          {r.challenger ? <Badge status="TESTING">Herausforderer</Badge> : !r.current ? <Badge>alt</Badge> : null}
+          <span className="max-w-[280px] truncate text-ink">{r.name}</span>
         </div>
       ),
     },
@@ -67,7 +72,7 @@ export function CompetitionTable({ rows }: { rows: CompetitionRow[] | undefined 
     { key: "freq", header: "Trades / h", align: "right", cell: (r) => <span className="num text-ink-2">{r.tradesPerHour?.toFixed(2) ?? "—"}</span>, sort: (r) => r.tradesPerHour },
     { key: "p", header: "p (E≤0)", align: "right", cell: (r) => <span className="num text-ink-2">{r.pValue.toPrecision(2)}</span>, sort: (r) => r.pValue },
   ];
-  return <Table rows={rows} columns={columns} rowKey={(r) => r.strategyId} onRowClick={(r) => nav(`/strategy-lab/${r.strategyId}`)} empty="Noch keine abgeschlossenen Paper Trades" />;
+  return <Table rows={rows} columns={columns} rowKey={(r) => r.versionId} onRowClick={(r) => nav(`/strategy-lab/${r.strategyId}`)} empty="Noch keine abgeschlossenen Paper Trades" />;
 }
 
 export function SignalsTable({ rows }: { rows: SignalRow[] | undefined }) {
@@ -125,7 +130,7 @@ export function PaperTradingPage() {
           <PnlBars points={curve.bars} height={110} />
         </Card>
       )}
-      <Card dense title="Strategie-Wettbewerb" subtitle="Sortiert nach Erwartungswert netto je Trade">
+      <Card dense title="Strategie-Wettbewerb" subtitle="Je Version, sortiert nach Erwartungswert netto je Trade — Herausforderer treten gegen die aktuelle Version an">
         <CompetitionTable rows={summary.data?.competition} />
       </Card>
       <Card dense title="Offene Paper-Positionen" subtitle={`${positions.data?.length ?? 0} offen`}>

@@ -69,6 +69,28 @@ interface Hypothesis {
   strategy_id: string | null;
 }
 
+interface EvolutionRun {
+  id: number;
+  started_at: string;
+  finished_at: string | null;
+  status: string;
+  examined: number;
+  proposed: number;
+}
+
+interface ChallengerRow {
+  id: string;
+  strategy_id: string;
+  name: string;
+  version: string;
+  status: string;
+  change_summary: string | null;
+  challenger_since: string | null;
+  challenger_outcome: string | null;
+  challenger_reason: string | null;
+  comparison: { challenger: { mean: number; n: number }; incumbent: { mean: number; n: number }; pBetter: number } | null;
+}
+
 const HORIZON_LABEL: Record<string, string> = { "60": "1 min", "300": "5 min", "900": "15 min", "1800": "30 min", "3600": "1 h", "14400": "4 h", "86400": "24 h" };
 
 function runStatus(s: string): string {
@@ -84,6 +106,9 @@ export function ResearchPage() {
   const label = useAction("/api/research/label-now", ["research"]);
   const clusters = useAction("/api/research/clusters-now", ["research"]);
   const discover = useAction("/api/discovery/run", ["strategies"]);
+  const evolve = useAction("/api/evolution/run", ["strategies"]);
+  const evoRuns = useApi<EvolutionRun[]>("strategies", "/api/evolution/runs", 30_000);
+  const challengers = useApi<ChallengerRow[]>("strategies", "/api/evolution/challengers", 30_000);
   const o = ov.data;
 
   const runCols: Column<RunRow>[] = [
@@ -111,13 +136,16 @@ export function ResearchPage() {
             <Button onClick={() => clusters.mutate(undefined)} loading={clusters.isPending}>
               <RefreshCw size={13} /> Situationen clustern
             </Button>
+            <Button onClick={() => evolve.mutate(undefined)} loading={evolve.isPending}>
+              <Play size={13} /> Evolution starten
+            </Button>
             <Button variant="primary" onClick={() => discover.mutate(undefined)} loading={discover.isPending}>
               <Play size={13} /> Discovery starten
             </Button>
           </>
         }
       />
-      {[label.error, clusters.error, discover.error].filter(Boolean).map((e, i) => (
+      {[label.error, clusters.error, discover.error, evolve.error].filter(Boolean).map((e, i) => (
         <ErrorBox key={i} error={e} />
       ))}
       <div className="grid grid-cols-2 gap-2 md:grid-cols-6">
@@ -184,6 +212,55 @@ export function ResearchPage() {
 
       <Card dense title="Discovery-Läufe" subtitle="Jeder Lauf testet Tausende Hypothesen; nur wenige überleben die Korrektur für multiples Testen und den Holdout">
         <Table rows={runs.data} columns={runCols} rowKey={(r) => String(r.id)} onRowClick={(r) => nav(`/research/runs/${r.id}`)} maxHeight={420} empty="Noch keine Läufe" />
+      </Card>
+
+      <Card dense title="Strategie-Evolution" subtitle="Varianten bestehender Strategien: Auswahl auf älteren Daten, Bestätigung auf neueren, dann Backtest und Paper-Vergleich mit der aktuellen Version">
+        <Table
+          rows={challengers.data}
+          rowKey={(c) => c.id}
+          maxHeight={360}
+          onRowClick={(c) => nav(`/strategy-lab/${c.strategy_id}`)}
+          empty="Noch keine Herausforderer-Versionen"
+          columns={[
+            { key: "v", header: "Version", cell: (c) => <span className="num text-ink">{c.id}</span> },
+            { key: "n", header: "Strategie", cell: (c) => <span className="block max-w-[220px] truncate text-ink-2">{c.name}</span> },
+            { key: "ch", header: "Änderung", cell: (c) => <span className="block max-w-[380px] truncate text-ink-2" title={c.change_summary ?? ""}>{c.change_summary}</span> },
+            {
+              key: "st",
+              header: "Stand",
+              cell: (c) =>
+                c.challenger_outcome ? (
+                  <Badge status={c.challenger_outcome === "retired" ? "REJECTED" : "PAPER_VALIDATED"}>{c.challenger_outcome}</Badge>
+                ) : (
+                  <Badge status="TESTING">{c.status === "TESTING" ? "Backtest" : "Paper-Vergleich"}</Badge>
+                ),
+            },
+            {
+              key: "cmp",
+              header: "Paper neu / aktuell",
+              align: "right",
+              cell: (c) =>
+                c.comparison ? (
+                  <span className="num">
+                    <Pnl value={c.comparison.challenger.mean} digits={5} /> / <Pnl value={c.comparison.incumbent.mean} digits={5} />{" "}
+                    <span className="text-muted">({c.comparison.challenger.n})</span>
+                  </span>
+                ) : (
+                  <span className="text-muted">—</span>
+                ),
+            },
+            { key: "r", header: "Grund", cell: (c) => <span className="block max-w-[260px] truncate text-muted" title={c.challenger_reason ?? ""}>{c.challenger_reason ?? ""}</span> },
+          ]}
+        />
+        <div className="border-t border-line px-4 py-2 text-[11px] text-muted">
+          Letzte Läufe:{" "}
+          {(evoRuns.data ?? []).slice(0, 5).map((r) => (
+            <span key={r.id} className="mr-3">
+              #{r.id} {dateTime(r.started_at)} · {r.status} · {r.examined} geprüft · {r.proposed} vorgeschlagen
+            </span>
+          ))}
+          {(evoRuns.data ?? []).length === 0 && "noch keine"}
+        </div>
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">

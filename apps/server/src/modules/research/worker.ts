@@ -69,6 +69,9 @@ port.on("message", async (msg: ToWorker) => {
         case "learnNow":
           result = await runtime.learning.run();
           break;
+        case "runEvolution":
+          result = await runtime.runEvolution();
+          break;
       }
       send({ type: "response", id: msg.id, ok: true, result });
     } catch (err) {

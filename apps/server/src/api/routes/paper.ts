@@ -11,16 +11,19 @@ export async function registerPaperRoutes(f: FastifyInstance, app: App): Promise
     const pf = await portfolio(app.db, app.indexer.market, "paper", { paperCapitalSol: s.trading.paperCapitalSol });
     const closed = await app.db.many<{ net_pnl_sol: number }>("SELECT net_pnl_sol FROM paper_trades WHERE status IN ('CLOSED','FAILED') AND net_pnl_sol IS NOT NULL ORDER BY closed_at");
     const stats = performance(closed.map((r) => r.net_pnl_sol));
-    const competition = await app.db.many<{ strategy_id: string; name: string; status: string; pnl: number[] }>(
-      `SELECT p.strategy_id, s.name, s.status, array_agg(p.net_pnl_sol ORDER BY p.closed_at) AS pnl
-         FROM paper_trades p JOIN strategies s ON s.id = p.strategy_id
-        WHERE p.status IN ('CLOSED','FAILED') AND p.net_pnl_sol IS NOT NULL GROUP BY p.strategy_id, s.name, s.status`,
+    // one row per strategy VERSION: challenger versions compete with their current version
+    const competition = await app.db.many<{ strategy_id: string; strategy_version_id: string; name: string; status: string; current: boolean; challenger: boolean; pnl: number[] }>(
+      `SELECT p.strategy_id, p.strategy_version_id, s.name, s.status, (s.current_version_id = p.strategy_version_id) AS current,
+              (v.challenger_since IS NOT NULL) AS challenger, array_agg(p.net_pnl_sol ORDER BY p.closed_at) AS pnl
+         FROM paper_trades p JOIN strategies s ON s.id = p.strategy_id JOIN strategy_versions v ON v.id = p.strategy_version_id
+        WHERE p.status IN ('CLOSED','FAILED') AND p.net_pnl_sol IS NOT NULL
+        GROUP BY p.strategy_id, p.strategy_version_id, s.name, s.status, s.current_version_id, v.challenger_since`,
     );
-    const freq = await app.db.many<{ strategy_id: string; per_hour: number }>(
-      `SELECT strategy_id, (count(*) / GREATEST(1, EXTRACT(EPOCH FROM (max(decision_ts) - min(decision_ts))) / 3600.0))::float8 AS per_hour
-         FROM paper_trades GROUP BY strategy_id`,
+    const freq = await app.db.many<{ strategy_version_id: string; per_hour: number }>(
+      `SELECT strategy_version_id, (count(*) / GREATEST(1, EXTRACT(EPOCH FROM (max(decision_ts) - min(decision_ts))) / 3600.0))::float8 AS per_hour
+         FROM paper_trades GROUP BY strategy_version_id`,
     );
-    const freqMap = new Map(freq.map((x) => [x.strategy_id, x.per_hour]));
+    const freqMap = new Map(freq.map((x) => [x.strategy_version_id, x.per_hour]));
     return {
       portfolio: { ...pf, positions: undefined },
       stats,
@@ -29,6 +32,9 @@ export async function registerPaperRoutes(f: FastifyInstance, app: App): Promise
           const p = performance(c.pnl);
           return {
             strategyId: c.strategy_id,
+            versionId: c.strategy_version_id,
+            current: c.current,
+            challenger: c.challenger,
             name: c.name,
             status: c.status,
             trades: p.n,
@@ -39,7 +45,7 @@ export async function registerPaperRoutes(f: FastifyInstance, app: App): Promise
             tailLoss: p.tailLoss,
             netSol: p.sum,
             stability: p.std > 0 ? p.mean / p.std : null,
-            tradesPerHour: freqMap.get(c.strategy_id) ?? null,
+            tradesPerHour: freqMap.get(c.strategy_version_id) ?? null,
             pValue: p.pValue,
           };
         })
