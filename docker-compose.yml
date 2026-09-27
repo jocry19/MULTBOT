@@ -66,6 +66,20 @@ services:
       driver: json-file
       options: { max-size: "20m", max-file: "5" }
 
+  # one-off tools (wallet keystore, password hash) — no network, secrets/ writable:
+  #   docker compose run --rm cli dist/cli/wallet.js create
+  #   docker compose run --rm cli dist/cli/wallet.js address
+  #   echo -n 'password' | docker compose run --rm -T cli dist/cli/hash-password.js
+  cli:
+    image: multbot:latest
+    profiles: ["tools"]
+    network_mode: none
+    env_file: .env
+    user: "${MULTBOT_UID:-1000}:${MULTBOT_GID:-1000}"
+    entrypoint: ["node"]
+    volumes:
+      - ./secrets:/app/secrets
+
 volumes:
   pgdata:
   logs:

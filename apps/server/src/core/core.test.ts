@@ -5,7 +5,10 @@ import { backoffDelay, CircuitBreaker, retry } from "./retry.js";
 import { PermanentError } from "./errors.js";
 import { TokenBucket } from "./rateLimiter.js";
 import { idempotencyKey, stableStringify } from "./hash.js";
-import { loadConfig } from "./config.js";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { loadConfig, loadEnvFile } from "./config.js";
 
 describe("SecretRegistry", () => {
   it("scrubs registered secrets and api keys in URLs", () => {
@@ -151,5 +154,17 @@ describe("config", () => {
     const cfg = loadConfig({ NODE_ENV: "test" });
     expect(cfg.rpc.endpoints).toHaveLength(1);
     expect(cfg.rpc.endpoints[0]?.name).toBe("solana-public");
+  });
+  it("reads a local .env from the repository root without overriding the real environment", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "multbot-env-"));
+    const cwd = path.join(root, "apps", "server");
+    fs.mkdirSync(cwd, { recursive: true });
+    fs.writeFileSync(path.join(root, ".env"), "HELIUS_API_KEY=from-file\nLOG_LEVEL=debug\n# comment\n");
+    const env: NodeJS.ProcessEnv = { LOG_LEVEL: "warn" };
+    expect(loadEnvFile(env, cwd)).toBe(root);
+    expect(env.HELIUS_API_KEY).toBe("from-file");
+    expect(env.LOG_LEVEL).toBe("warn");
+    expect(loadEnvFile({ NODE_ENV: "test" }, cwd)).toBeNull();
+    fs.rmSync(root, { recursive: true, force: true });
   });
 });

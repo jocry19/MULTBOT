@@ -1,4 +1,6 @@
 import fs from "node:fs";
+import path from "node:path";
+import { parseEnv } from "node:util";
 import { z } from "zod";
 import { secrets } from "./secrets.js";
 
@@ -92,12 +94,33 @@ export interface AppConfig {
 const PUBLIC_MAINNET_HTTP = "https://api.mainnet-beta.solana.com";
 const PUBLIC_MAINNET_WS = "wss://api.mainnet-beta.solana.com";
 
+/**
+ * Local runs: read KEY=VALUE pairs from a .env file ($MULTBOT_ENV_FILE, ./.env or the repository
+ * root) without overriding variables that are already set. Returns the directory of the file.
+ * Containers get their environment from docker compose instead.
+ */
+export function loadEnvFile(env: NodeJS.ProcessEnv = process.env, cwd = process.cwd()): string | null {
+  if (env.NODE_ENV === "test") return null;
+  const candidates = [env.MULTBOT_ENV_FILE, path.join(cwd, ".env"), path.join(cwd, "..", "..", ".env")].filter((f): f is string => Boolean(f));
+  for (const f of candidates) {
+    if (!fs.existsSync(f)) continue;
+    for (const [k, v] of Object.entries(parseEnv(fs.readFileSync(f, "utf8")))) {
+      if (env[k] === undefined) env[k] = v;
+    }
+    return path.dirname(path.resolve(f));
+  }
+  return null;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
+  // relative paths in .env are relative to the .env file (so local and Docker use the same layout)
+  const baseDir = (env === process.env ? loadEnvFile(env) : null) ?? process.cwd();
   const e = envSchema.parse(env);
+  const keystorePath = path.resolve(baseDir, e.WALLET_KEYSTORE_PATH);
 
   let passphrase = e.WALLET_KEYSTORE_PASSPHRASE;
   if (!passphrase && e.WALLET_KEYSTORE_PASSPHRASE_FILE) {
-    passphrase = fs.readFileSync(e.WALLET_KEYSTORE_PASSPHRASE_FILE, "utf8").trim();
+    passphrase = fs.readFileSync(path.resolve(baseDir, e.WALLET_KEYSTORE_PASSPHRASE_FILE), "utf8").trim();
   }
 
   for (const s of [e.HELIUS_API_KEY, e.JUPITER_API_KEY, e.COINGECKO_API_KEY, passphrase, e.ADMIN_PASSWORD_HASH]) {
@@ -134,7 +157,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     jupiter: { apiUrl: e.JUPITER_API_URL, apiKey: e.JUPITER_API_KEY },
     pumpPortal: { apiUrl: e.PUMPPORTAL_API_URL },
     fx: { provider: e.FX_PROVIDER, coingeckoApiKey: e.COINGECKO_API_KEY },
-    wallet: { keystorePath: e.WALLET_KEYSTORE_PATH, passphrase },
+    wallet: { keystorePath, passphrase },
     auth: { adminPasswordHash: e.ADMIN_PASSWORD_HASH, sessionTtlHours: e.SESSION_TTL_HOURS },
     features: {
       ingest: e.ENABLE_INGEST ?? !isTest,
