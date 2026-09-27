@@ -173,6 +173,9 @@ importers:
       '@solarbiter/jupiter':
         specifier: workspace:*
         version: link:../jupiter
+      '@solarbiter/paper-engine':
+        specifier: workspace:*
+        version: link:../paper-engine
       '@solarbiter/profit-engine':
         specifier: workspace:*
         version: link:../profit-engine

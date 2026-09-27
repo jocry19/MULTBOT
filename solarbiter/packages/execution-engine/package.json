@@ -22,6 +22,7 @@
     "@solarbiter/dex": "workspace:*",
     "@solarbiter/jito": "workspace:*",
     "@solarbiter/jupiter": "workspace:*",
+    "@solarbiter/paper-engine": "workspace:*",
     "@solarbiter/profit-engine": "workspace:*",
     "@solarbiter/quotes": "workspace:*",
     "@solarbiter/risk-engine": "workspace:*",
