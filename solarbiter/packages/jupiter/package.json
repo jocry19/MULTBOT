@@ -1,0 +1,30 @@
+{
+  "name": "@solarbiter/jupiter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@solarbiter/dex": "workspace:*",
+    "@solarbiter/quotes": "workspace:*",
+    "@solarbiter/shared": "workspace:*",
+    "pino": "^10.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "typescript": "5.9.3"
+  }
+}

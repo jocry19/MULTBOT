@@ -1,0 +1,38 @@
+{
+  "name": "@solarbiter/execution-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.99.0",
+    "@solarbiter/dex": "workspace:*",
+    "@solarbiter/jito": "workspace:*",
+    "@solarbiter/jupiter": "workspace:*",
+    "@solarbiter/profit-engine": "workspace:*",
+    "@solarbiter/quotes": "workspace:*",
+    "@solarbiter/risk-engine": "workspace:*",
+    "@solarbiter/shared": "workspace:*",
+    "@solarbiter/solana": "workspace:*",
+    "@solarbiter/wallet": "workspace:*",
+    "bs58": "^6.0.0",
+    "pino": "^10.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "typescript": "5.9.3"
+  }
+}

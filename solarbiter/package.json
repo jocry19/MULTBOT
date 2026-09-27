@@ -1,0 +1,52 @@
+{
+  "name": "solarbiter",
+  "private": true,
+  "version": "0.1.0",
+  "description": "SOLARBITER \u2014 Solana multi-DEX arbitrage engine: live quotes, realistic net-edge model, paper/shadow validation, gated live execution",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm -r --filter './packages/**' build && pnpm --filter @solarbiter/api --filter @solarbiter/worker build && pnpm --filter @solarbiter/web build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dev:api": "pnpm --filter @solarbiter/api dev",
+    "dev:worker": "pnpm --filter @solarbiter/worker dev",
+    "dev:web": "pnpm --filter @solarbiter/web dev",
+    "db:migrate": "pnpm --filter @solarbiter/worker db:migrate",
+    "db:seed": "pnpm --filter @solarbiter/worker db:seed",
+    "user:create": "pnpm --filter @solarbiter/api user:create",
+    "wallet:create": "pnpm --filter @solarbiter/worker wallet:create",
+    "wallet:import": "pnpm --filter @solarbiter/worker wallet:import",
+    "wallet:address": "pnpm --filter @solarbiter/worker wallet:address"
+  },
+  "devDependencies": {
+    "@solarbiter/arbitrage": "workspace:*",
+    "@solarbiter/database": "workspace:*",
+    "@solarbiter/dex": "workspace:*",
+    "@solarbiter/execution-engine": "workspace:*",
+    "@solarbiter/jito": "workspace:*",
+    "@solarbiter/jupiter": "workspace:*",
+    "@solarbiter/learning-engine": "workspace:*",
+    "@solarbiter/meteora": "workspace:*",
+    "@solarbiter/notifications": "workspace:*",
+    "@solarbiter/orca": "workspace:*",
+    "@solarbiter/paper-engine": "workspace:*",
+    "@solarbiter/profit-engine": "workspace:*",
+    "@solarbiter/quotes": "workspace:*",
+    "@solarbiter/raydium": "workspace:*",
+    "@solarbiter/risk-engine": "workspace:*",
+    "@solarbiter/shared": "workspace:*",
+    "@solarbiter/solana": "workspace:*",
+    "@solarbiter/tax": "workspace:*",
+    "@solarbiter/wallet": "workspace:*",
+    "@types/node": "^22.20.4",
+    "pino": "^10.3.1",
+    "tsx": "^4.23.15",
+    "typescript": "5.9.3",
+    "vitest": "^4.1.11"
+  },
+  "packageManager": "pnpm@10.33.0"
+}
