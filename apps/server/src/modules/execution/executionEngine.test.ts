@@ -33,6 +33,10 @@ interface FakeState {
   statuses: ({ slot: number; confirmations: number; err: unknown; confirmationStatus: "confirmed" } | null)[];
   blockHeight: number;
   sent: string[];
+  /** Owner program of the mint account; null = mint does not exist. */
+  mintOwner?: string | null;
+  /** On-chain error of the landed transaction (only the fee is charged then). */
+  txErr?: unknown;
 }
 
 function fakeRpc(st: FakeState): RpcManager {
@@ -43,7 +47,8 @@ function fakeRpc(st: FakeState): RpcManager {
       throw new Error(`unexpected ${method}`);
     },
     callVerified: async () => ({ result: { value: st.balance }, verified: true }),
-    getAccountInfo: async () => ({ lamports: 1, owner: TOKEN_PROGRAM_ID, data: ["", "base64"], executable: false, rentEpoch: 0 }),
+    getAccountInfo: async () =>
+      st.mintOwner === null ? null : { lamports: 1, owner: st.mintOwner ?? TOKEN_PROGRAM_ID, data: ["", "base64"], executable: false, rentEpoch: 0 },
     simulateTransaction: async () => ({
       err: st.simErr,
       logs: [],
@@ -62,15 +67,17 @@ function fakeRpc(st: FakeState): RpcManager {
     getTransaction: async () => ({
       slot: 42,
       blockTime: 1_800_000_000,
-      meta: {
-        err: null,
-        fee: 5000,
-        preBalances: [st.balance],
-        postBalances: [st.balance - 10_300_000],
-        logMessages: [],
-        preTokenBalances: [],
-        postTokenBalances: [{ accountIndex: 1, mint: MINT, owner: wallet, uiTokenAmount: { amount: "350000000000", decimals: 6, uiAmount: 350000 } }],
-      },
+      meta: st.txErr
+        ? { err: st.txErr, fee: 105_000, preBalances: [st.balance], postBalances: [st.balance - 105_000], logMessages: [], preTokenBalances: [], postTokenBalances: [] }
+        : {
+            err: null,
+            fee: 5000,
+            preBalances: [st.balance],
+            postBalances: [st.balance - 10_300_000],
+            logMessages: [],
+            preTokenBalances: [],
+            postTokenBalances: [{ accountIndex: 1, mint: MINT, owner: wallet, uiTokenAmount: { amount: "350000000000", decimals: 6, uiAmount: 350000 } }],
+          },
       transaction: { signatures: ["x"], message: { accountKeys: [wallet], recentBlockhash: "", instructions: [] } },
     }),
   };
@@ -78,10 +85,10 @@ function fakeRpc(st: FakeState): RpcManager {
 }
 
 /** Provider that returns a Jupiter-like wrap/swap/unwrap transaction (swap simulated by syncNative). */
-function fakeProvider(opts: { drain?: boolean } = {}): SwapProvider {
+function fakeProvider(opts: { drain?: boolean; priceImpactPct?: number } = {}): SwapProvider {
   return {
     name: "jupiter",
-    quote: async (p): Promise<SwapQuote> => ({ provider: "jupiter", inputMint: p.inputMint, outputMint: p.outputMint, inAmount: p.amount, outAmount: 350_000_000_000n, minOut: 330_000_000_000n, priceImpactPct: 1, route: ["Pump.fun"], raw: {} }),
+    quote: async (p): Promise<SwapQuote> => ({ provider: "jupiter", inputMint: p.inputMint, outputMint: p.outputMint, inAmount: p.amount, outAmount: 350_000_000_000n, minOut: 330_000_000_000n, priceImpactPct: opts.priceImpactPct ?? 1, route: ["Pump.fun"], raw: {} }),
     build: async () => {
       const wsolAta = new PublicKey(associatedTokenAddress(wallet, WSOL_MINT));
       const ixs: TransactionInstruction[] = [
@@ -171,5 +178,64 @@ describe("ExecutionEngine", () => {
     const st = { ...baseState(), statuses: [], blockHeight: 2000 };
     const r = await engine(st).execute({ idempotencyKey: "buy-expire", liveTradeId: null, kind: "buy", mint: MINT, amount: 10_000_000n, maxSlippageBps: 1500 });
     expect(r.status).toBe("EXPIRED");
+  });
+
+  // --- failure simulations -------------------------------------------------------------------
+
+  it("refuses a trade whose price impact exceeds the slippage limit (thin liquidity)", async () => {
+    const st = baseState();
+    const r = await engine(st, fakeProvider({ priceImpactPct: 22 })).execute({ idempotencyKey: "buy-impact", liveTradeId: null, kind: "buy", mint: MINT, amount: 10_000_000n, maxSlippageBps: 1500 });
+    expect(r.status).toBe("REJECTED");
+    expect(r.error).toMatch(/price impact/);
+    expect(st.sent).toHaveLength(0);
+  });
+
+  it("refuses invalid or non-existent token mints before building anything", async () => {
+    const st = { ...baseState(), mintOwner: "11111111111111111111111111111111" };
+    const r = await engine(st).execute({ idempotencyKey: "buy-notmint", liveTradeId: null, kind: "buy", mint: MINT, amount: 10_000_000n, maxSlippageBps: 1500 });
+    expect(r.status).toBe("REJECTED");
+    expect(r.error).toMatch(/not a token mint/);
+    const st2 = { ...baseState(), mintOwner: null };
+    const r2 = await engine(st2).execute({ idempotencyKey: "buy-nomint", liveTradeId: null, kind: "buy", mint: Keypair.generate().publicKey.toBase58(), amount: 10_000_000n, maxSlippageBps: 1500 });
+    expect(r2.status).toBe("REJECTED");
+    expect(r2.error).toMatch(/does not exist/);
+    expect([...st.sent, ...st2.sent]).toHaveLength(0);
+  });
+
+  it("after a crash, resumes a sent order by confirming it instead of sending again", async () => {
+    await db.query(
+      `INSERT INTO orders (id, idempotency_key, kind, mint, status, provider, input_amount, signature, last_valid_block_height, sent_at)
+       VALUES ('crash-sent', 'buy-crash-sent', 'buy', $1, 'SENT', 'jupiter', 10000000, 'sigCrashSent', 1000, now())`,
+      [MINT],
+    );
+    const st = { ...baseState(), statuses: [{ slot: 42, confirmations: 1, err: null, confirmationStatus: "confirmed" as const }] };
+    const r = await engine(st).resume("buy-crash-sent");
+    expect(r.status).toBe("CONFIRMED");
+    expect(r.tokenDeltaRaw).toBe(350_000_000_000n);
+    expect(st.sent).toHaveLength(0);
+    // a duplicate request with the same key returns the stored result
+    const again = await engine(baseState()).execute({ idempotencyKey: "buy-crash-sent", liveTradeId: null, kind: "buy", mint: MINT, amount: 10_000_000n, maxSlippageBps: 1500 });
+    expect(again.status).toBe("CONFIRMED");
+  });
+
+  it("after a crash before signing, marks the order failed (nothing was sent, a new decision is needed)", async () => {
+    await db.query(
+      `INSERT INTO orders (id, idempotency_key, kind, mint, status, provider, input_amount) VALUES ('crash-quoted', 'buy-crash-quoted', 'buy', $1, 'QUOTED', 'jupiter', 10000000)`,
+      [MINT],
+    );
+    const st = baseState();
+    const r = await engine(st).resume("buy-crash-quoted");
+    expect(r.status).toBe("FAILED");
+    expect(r.error).toMatch(/before signing/);
+    expect(st.sent).toHaveLength(0);
+  });
+
+  it("records a failed on-chain transaction as failed (fees paid, no position)", async () => {
+    const txErr = { InstructionError: [2, { Custom: 6001 }] };
+    const st = { ...baseState(), txErr, statuses: [{ slot: 42, confirmations: 1, err: txErr, confirmationStatus: "confirmed" as const }] };
+    const r = await engine(st).execute({ idempotencyKey: "buy-onchain-fail", liveTradeId: null, kind: "buy", mint: MINT, amount: 10_000_000n, maxSlippageBps: 1500 });
+    expect(r.status).toBe("FAILED");
+    expect(r.tokenDeltaRaw ?? 0n).toBe(0n);
+    expect(r.solDeltaLamports).toBe(-105_000);
   });
 });

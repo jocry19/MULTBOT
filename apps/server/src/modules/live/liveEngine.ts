@@ -414,9 +414,17 @@ export class LiveEngine extends BaseModule {
       this.activity.warn("live", `LIVE exit attempt failed (${r.status}): ${r.error ?? ""} — will retry`, { tradeId: p.id });
       return;
     }
-    // refund the token account rent when fully sold
+    // partial holdings: the wallet held fewer tokens than recorded (e.g. transfer fees, external
+    // movement) — we sold what was there; record the shortfall instead of pretending otherwise
+    const shortfallRaw = p.tokenRaw - amount;
+    if (shortfallRaw > 0n) {
+      this.activity.warn("live", `Position ${p.id}: wallet held ${amount} of ${p.tokenRaw} recorded tokens — sold the available amount`, { tradeId: p.id });
+    }
+    // refund the token account rent when this mint is fully sold and no other position uses it
     let rentRefund = 0;
-    const soldAll = (r.tokenDeltaRaw ?? 0n) + p.tokenRaw <= 0n || amount === p.tokenRaw;
+    const otherPositionOnMint = [...this.positions.values()].some((x) => x.id !== p.id && x.mint === p.mint);
+    const walletEmptied = held !== undefined ? held - amount <= 0n : (r.tokenDeltaRaw ?? 0n) + p.tokenRaw <= 0n || amount === p.tokenRaw;
+    const soldAll = !otherPositionOnMint && walletEmptied;
     if (soldAll) {
       const c = await this.execution.execute({ idempotencyKey: idempotencyKey("live-close-ata", p.id), liveTradeId: p.id, kind: "close", mint: p.mint, amount: 0n, maxSlippageBps: 0 });
       if (c.status === "CONFIRMED" && c.solDeltaLamports !== null) rentRefund = c.solDeltaLamports / 1e9;
@@ -432,6 +440,7 @@ export class LiveEngine extends BaseModule {
       [p.id],
     );
     const tokens = Number(p.tokenRaw) / 10 ** p.decimals;
+    const soldTokens = Number(amount) / 10 ** p.decimals;
     const expectedSol = r.quote ? Number(r.quote.outAmount) / 1e9 : grossExit;
     const exitSlippage = Math.max(0, expectedSol - grossExit);
     const totalCosts = (row?.priority_fees_sol ?? 0) + priority + (row?.network_fees_sol ?? 0) + network + (row?.entry_slippage_sol ?? 0) + exitSlippage + (row?.entry_rent_sol ?? 0) - rentRefund;
@@ -442,7 +451,7 @@ export class LiveEngine extends BaseModule {
          actual = COALESCE(actual, '{}'::jsonb) || $15::jsonb WHERE id = $1`,
       [
         p.id,
-        tokens > 0 ? received / tokens : 0,
+        soldTokens > 0 ? received / soldTokens : 0,
         grossExit,
         exitSlippage,
         rentRefund,
@@ -455,7 +464,12 @@ export class LiveEngine extends BaseModule {
         p.trough / p.entrySpot - 1,
         r.signature,
         reason,
-        JSON.stringify({ netReturn: p.costSol > 0 ? net / p.costSol : 0, marketMove: spot > 0 ? spot / p.entrySpot - 1 : null, exitOrderId: r.orderId }),
+        JSON.stringify({
+          netReturn: p.costSol > 0 ? net / p.costSol : 0,
+          marketMove: spot > 0 ? spot / p.entrySpot - 1 : null,
+          exitOrderId: r.orderId,
+          ...(shortfallRaw > 0n ? { shortfallRaw: shortfallRaw.toString() } : {}),
+        }),
       ],
     );
     await this.ledger.append(
@@ -476,9 +490,9 @@ export class LiveEngine extends BaseModule {
         priorityFeeSol: priority,
         slippageSol: exitSlippage,
         rentSol: -rentRefund,
-        executionPrice: tokens > 0 ? received / tokens : null,
-        expectedPrice: tokens > 0 ? expectedSol / tokens : null,
-        realizedPrice: tokens > 0 ? received / tokens : null,
+        executionPrice: soldTokens > 0 ? received / soldTokens : null,
+        expectedPrice: soldTokens > 0 ? expectedSol / soldTokens : null,
+        realizedPrice: soldTokens > 0 ? received / soldTokens : null,
         grossPnlSol: net + totalCosts,
         netPnlSol: net,
       },

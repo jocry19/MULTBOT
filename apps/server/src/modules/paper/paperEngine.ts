@@ -118,6 +118,13 @@ export class PaperEngine extends BaseModule {
   }
 
   private async recoverOpenPositions(): Promise<void> {
+    // entries that were waiting for their simulated fill when the process stopped never filled:
+    // close them as interrupted (no P&L) instead of leaving phantom open positions behind
+    const interrupted = await this.db.query(
+      `UPDATE paper_trades SET status = 'FAILED', failed_reason = 'INTERRUPTED_BY_RESTART', closed_at = now()
+        WHERE status = 'OPENING'`,
+    );
+    if ((interrupted.rowCount ?? 0) > 0) this.activity.info("paper", `${interrupted.rowCount} paper entries interrupted by a restart were closed without fill`);
     const rows = await this.db.many<{
       id: string;
       strategy_id: string;
