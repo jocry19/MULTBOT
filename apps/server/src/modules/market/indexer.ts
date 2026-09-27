@@ -119,7 +119,7 @@ export class MarketIndexer extends BaseModule {
     super("indexer", log);
     this.opts = {
       evalIntervalMs: opts.evalIntervalMs ?? 5_000,
-      sampleIntervalMs: opts.sampleIntervalMs ?? 60_000,
+      sampleIntervalMs: opts.sampleIntervalMs ?? 120_000,
       minTradesForSample: opts.minTradesForSample ?? 3,
       maxEvalsPerTick: opts.maxEvalsPerTick ?? 400,
       persist: opts.persist ?? db !== null,
@@ -232,8 +232,10 @@ export class MarketIndexer extends BaseModule {
   }
 
   private samplingTrigger(t: TokenState, now: number, detected: DetectedEvent[]): string | null {
-    if (detected.length > 0) {
-      const top = [...detected].sort((a, b) => b.severity - a.severity)[0] as DetectedEvent;
+    // named events trigger an immediate decision point; generic anomalies/combos only enrich features
+    const namedEvents = detected.filter((d) => !d.type.startsWith("anomaly:") && !d.type.startsWith("combo:"));
+    if (namedEvents.length > 0) {
+      const top = [...namedEvents].sort((a, b) => b.severity - a.severity)[0] as DetectedEvent;
       return `event:${top.type}`;
     }
     const age = t.ageAt(now);
@@ -285,7 +287,8 @@ export class MarketIndexer extends BaseModule {
       const trigger = this.samplingTrigger(t, now, detected);
       if (trigger) {
         this.lastSampleAt.set(t.mint, now);
-        const top = detected.length > 0 ? [...detected].sort((a, b) => b.severity - a.severity)[0] ?? null : null;
+        const named = detected.filter((d) => !d.type.startsWith("anomaly:") && !d.type.startsWith("combo:"));
+        const top = named.length > 0 ? [...named].sort((a, b) => b.severity - a.severity)[0] ?? null : null;
         samples.push({ mint: t.mint, ts: now, trigger, eventUid: top?.uid ?? null, ageSec: Math.round(t.ageAt(now)), venue: t.venue, features, regime: this.regime.state });
       }
     }

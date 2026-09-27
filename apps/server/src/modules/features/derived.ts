@@ -16,15 +16,21 @@ export interface DerivedFeatureDef {
 const EPS = 1e-9;
 
 export function derivedName(op: DerivedOp, args: string[]): string {
-  return `d_${op}__${args.join("__")}`;
+  return `d:${op}(${args.join(",")})`;
+}
+
+const DERIVED_RE = /^d:(ratio|product|diff|ratio3)\(([^()]+)\)$/;
+
+export function isDerivedName(name: string): boolean {
+  return name.startsWith("d:");
 }
 
 export function parseDerivedName(name: string): DerivedFeatureDef | null {
-  if (!name.startsWith("d_")) return null;
-  const [opPart, ...args] = name.slice(2).split("__");
-  if (!opPart || args.length < 2) return null;
-  if (!["ratio", "product", "diff", "ratio3"].includes(opPart)) return null;
-  return { name, op: opPart as DerivedOp, args };
+  const m = DERIVED_RE.exec(name);
+  if (!m) return null;
+  const args = (m[2] as string).split(",");
+  if (args.length < 2 || args.some((a) => a.length === 0 || a.startsWith("d:"))) return null;
+  return { name, op: m[1] as DerivedOp, args };
 }
 
 export function evalDerived(def: DerivedFeatureDef, f: FeatureVector): number | undefined {

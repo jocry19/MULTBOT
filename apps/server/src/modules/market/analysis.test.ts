@@ -92,11 +92,14 @@ describe("MarketState & features", () => {
   });
 
   it("derived features round-trip through their names", () => {
-    const name = derivedName("ratio", ["volume_60s", "liquidity_sol"]);
+    const name = derivedName("ratio", ["volume_60s__ctxz", "liquidity_sol"]);
+    expect(name).toBe("d:ratio(volume_60s__ctxz,liquidity_sol)");
     const def = parseDerivedName(name)!;
-    const f = applyDerived([def], { volume_60s: 10, liquidity_sol: 5 });
+    expect(def.args).toEqual(["volume_60s__ctxz", "liquidity_sol"]);
+    expect(parseDerivedName("d:ratio(d:ratio(a,b),c)")).toBeNull();
+    const f = applyDerived([def], { volume_60s__ctxz: 10, liquidity_sol: 5 });
     expect(f[name]).toBeCloseTo(2, 6);
-    expect(applyDerived([def], { volume_60s: 10 })[name]).toBeUndefined();
+    expect(applyDerived([def], { volume_60s__ctxz: 10 })[name]).toBeUndefined();
   });
 });
 

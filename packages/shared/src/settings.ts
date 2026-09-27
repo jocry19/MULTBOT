@@ -84,6 +84,13 @@ export const researchSettingsSchema = z.object({
   }),
   /** Decay monitoring window (closed trades). */
   decayWindowTrades: z.number().int().min(10).max(10_000),
+  /** Data retention in days (older day partitions are dropped). */
+  retention: z.object({
+    rawTradesDays: z.number().int().min(1).max(3650),
+    researchSamplesDays: z.number().int().min(1).max(3650),
+    snapshotsDays: z.number().int().min(1).max(3650),
+    eventsDays: z.number().int().min(1).max(3650),
+  }),
 });
 export type ResearchSettings = z.infer<typeof researchSettingsSchema>;
 
@@ -141,6 +148,7 @@ export const DEFAULT_SETTINGS: Settings = {
       maxDrawdownSol: 0.05,
     },
     decayWindowTrades: 50,
+    retention: { rawTradesDays: 14, researchSamplesDays: 30, snapshotsDays: 7, eventsDays: 30 },
   },
 };
 

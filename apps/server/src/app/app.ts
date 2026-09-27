@@ -1,3 +1,4 @@
+import type { Settings } from "@multbot/shared";
 import type { Logger } from "pino";
 import { TypedBus } from "../core/bus.js";
 import { systemClock, type Clock } from "../core/clock.js";
@@ -19,9 +20,9 @@ import { WalletBook } from "../modules/wallets/walletBook.js";
 import { BaseModule } from "../core/module.js";
 import type { BusEvents } from "./busEvents.js";
 
-/** Small module wrapper for periodic housekeeping jobs. */
+/** Small module wrapper for periodic housekeeping jobs (activity flush, partitions, retention). */
 class Housekeeping extends BaseModule {
-  constructor(db: Database, activity: ActivityLog, log: Logger) {
+  constructor(db: Database, activity: ActivityLog, log: Logger, settings: () => Settings) {
     super("housekeeping", log);
     this.every("activity-flush", 2_000, () => activity.flush());
     this.every("db-ping", 10_000, async () => {
@@ -35,6 +36,15 @@ class Housekeeping extends BaseModule {
       }
     }, true);
     this.every("retention", 3_600_000, async () => {
+      const r = settings().research.retention;
+      const cutoff = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
+      await db.query("SELECT drop_daily_partitions_before('market_trades', $1::date)", [cutoff(r.rawTradesDays)]);
+      await db.query("SELECT drop_daily_partitions_before('research_samples', $1::date)", [cutoff(r.researchSamplesDays)]);
+      for (const t of ["token_snapshots", "volume_snapshots", "liquidity_snapshots"]) {
+        await db.query("SELECT drop_daily_partitions_before($1, $2::date)", [t, cutoff(r.snapshotsDays)]);
+      }
+      await db.query("DELETE FROM events WHERE ts < $1::date", [cutoff(r.eventsDays)]);
+      await db.query("DELETE FROM market_regimes WHERE ts < $1::date", [cutoff(r.eventsDays)]);
       await db.query("DELETE FROM bot_activity WHERE ts < now() - interval '30 days'");
       await db.query("DELETE FROM auth_sessions WHERE expires_at < now()");
     });
@@ -83,7 +93,7 @@ export class App {
     this.indexer = new MarketIndexer(this.db, this.bus, this.wallets, clock, this.activity, log.child({ module: "indexer" }));
     this.walletAnalyzer = new WalletAnalyzer(this.db, this.wallets, clock, log.child({ module: "wallets" }));
 
-    this.registry.register(new Housekeeping(this.db, this.activity, log.child({ module: "housekeeping" })));
+    this.registry.register(new Housekeeping(this.db, this.activity, log.child({ module: "housekeeping" }), () => this.state.get()));
     this.registry.register(this.rpc);
     this.registry.register(this.walletAnalyzer);
     this.registry.register(this.indexer);

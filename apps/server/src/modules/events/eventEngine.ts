@@ -38,6 +38,8 @@ export interface Detector {
 
 const v = (f: FeatureVector, k: string, d = 0) => f[k] ?? d;
 
+const LIFECYCLE = new Set(["token_created", "curve_complete", "migration", "regime_shift"]);
+
 function pick(f: FeatureVector, keys: string[]): Record<string, number> {
   const out: Record<string, number> = {};
   for (const k of keys) if (f[k] !== undefined) out[k] = Number((f[k] as number).toPrecision(6));
@@ -282,8 +284,8 @@ export class EventEngine {
     private readonly detectors: Detector[] = DEFAULT_DETECTORS,
     opts: EventEngineOptions = {},
   ) {
-    this.genericZ = opts.genericZ ?? 4.5;
-    this.genericCooldownSec = opts.genericCooldownSec ?? 180;
+    this.genericZ = opts.genericZ ?? 5;
+    this.genericCooldownSec = opts.genericCooldownSec ?? 300;
     this.comboWindowSec = opts.comboWindowSec ?? 30;
     this.processingDelayMs = opts.processingDelayMs ?? 0;
   }
@@ -351,15 +353,21 @@ export class EventEngine {
       const dir = z > 0 ? "up" : "down";
       this.fire(`anomaly:${feat}:${dir}`, t.mint, now, this.genericCooldownSec, { severity: Math.abs(z), direction: z > 0 ? 1 : -1, context: { [feat]: f[feat] ?? 0, z } }, "generic_anomaly", 1, out);
     }
-    // combination events: named events co-occurring within the combo window
+    // combination events: the strongest pair of named events co-occurring within the combo window
+    // (at most one combination per token and evaluation — keeps the vocabulary informative, not explosive)
     const recent = this.lastByToken.get(t.mint);
     if (recent && named.length > 0) {
+      const severityOf = new Map(out.map((e) => [e.type, e.severity]));
+      let best: { pair: string; score: number } | null = null;
       for (const a of named) {
         for (const [b, ts] of recent) {
-          if (a === b || b.startsWith("anomaly:") || b.startsWith("combo:") || now - ts > this.comboWindowSec * 1000) continue;
-          const pair = [a, b].sort().join("+");
-          this.fire(`combo:${pair}`, t.mint, now, this.comboWindowSec * 4, { severity: 1, direction: 0, context: {} }, "combination", 1, out);
+          if (a === b || LIFECYCLE.has(b) || b.startsWith("anomaly:") || b.startsWith("combo:") || now - ts > this.comboWindowSec * 1000) continue;
+          const score = (severityOf.get(a) ?? 1) + (severityOf.get(b) ?? 1);
+          if (!best || score > best.score) best = { pair: [a, b].sort().join("+"), score };
         }
+      }
+      if (best) {
+        this.fire(`combo:${best.pair}`, t.mint, now, 300, { severity: best.score / 2, direction: 0, context: {} }, "combination", 1, out);
       }
     }
     return out;

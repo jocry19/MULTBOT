@@ -30,7 +30,7 @@ export class WalletAnalyzer extends BaseModule {
       `SELECT * FROM wallets WHERE closed_positions >= 5 ORDER BY closed_positions DESC LIMIT 300000`,
     );
     for (const r of rows) this.book.hydrate(r.address, rowToTotals(r), r.cluster_id);
-    const creators = await this.db.many<{ address: string; tokens_created: number; tokens_completed: number; quick_dumps: number; first_created_at: string | null; last_created_at: string | null }>(
+    const creators = await this.db.many<{ address: string; tokens_created: number; tokens_completed: number; quick_dumps: number; first_created_at: Date | null; last_created_at: Date | null }>(
       "SELECT address, tokens_created, tokens_completed, quick_dumps, first_created_at, last_created_at FROM creators WHERE last_created_at > now() - interval '30 days'",
     );
     for (const c of creators) {
@@ -38,8 +38,8 @@ export class WalletAnalyzer extends BaseModule {
         tokensCreated: c.tokens_created,
         tokensCompleted: c.tokens_completed,
         quickDumps: c.quick_dumps,
-        firstCreatedAt: c.first_created_at ? Date.parse(c.first_created_at) : 0,
-        lastCreatedAt: c.last_created_at ? Date.parse(c.last_created_at) : 0,
+        firstCreatedAt: c.first_created_at?.getTime() ?? 0,
+        lastCreatedAt: c.last_created_at?.getTime() ?? 0,
       });
     }
     this.log.info({ wallets: rows.length, creators: creators.length }, "wallet intelligence loaded");
@@ -172,7 +172,7 @@ export class WalletAnalyzer extends BaseModule {
 
   /** Co-trading clusters from early buyers of tokens created in the last 24h. */
   async cluster(): Promise<void> {
-    const rows = await this.db.many<{ mint: string; trader: string; slot: number; ts: string }>(
+    const rows = await this.db.many<{ mint: string; trader: string; slot: number; ts: Date }>(
       `WITH recent AS (
          SELECT mint FROM tokens WHERE created_at > now() - interval '24 hours'
        ), ranked AS (
@@ -182,7 +182,7 @@ export class WalletAnalyzer extends BaseModule {
        )
        SELECT mint, trader, slot, ts FROM ranked WHERE rn <= 30`,
     );
-    const obs: CoTradeObservation[] = rows.map((r) => ({ mint: r.mint, wallet: r.trader, slot: r.slot, ts: Date.parse(r.ts) }));
+    const obs: CoTradeObservation[] = rows.map((r) => ({ mint: r.mint, wallet: r.trader, slot: r.slot, ts: r.ts.getTime() }));
     const clusters = clusterWallets(obs, { minSharedTokens: 3, maxClusterSize: 200 });
     await this.db.tx(async (c) => {
       await c.query("UPDATE wallet_clusters SET active = false WHERE active");
@@ -204,8 +204,8 @@ export class WalletAnalyzer extends BaseModule {
 
 type WalletRow = {
   address: string;
-  first_seen_at: string;
-  last_seen_at: string;
+  first_seen_at: Date;
+  last_seen_at: Date;
   trade_count: number;
   buy_count: number;
   sell_count: number;
@@ -224,10 +224,10 @@ type WalletRow = {
 };
 
 function rowToTotals(r: WalletRow): WalletTotals {
-  const t = emptyTotals(Date.parse(r.first_seen_at));
+  const t = emptyTotals(r.first_seen_at.getTime());
   return {
     ...t,
-    lastSeenAt: Date.parse(r.last_seen_at),
+    lastSeenAt: r.last_seen_at.getTime(),
     trades: r.trade_count,
     buys: r.buy_count,
     sells: r.sell_count,
