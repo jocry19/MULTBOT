@@ -1,11 +1,17 @@
 ﻿# SOLARBITER launcher for Windows — called by "SOLARBITER starten.bat" / "SOLARBITER stoppen.bat".
 #
-#   launcher.ps1 start   start (first run: setup), wait until ready, open the dashboard
-#   launcher.ps1 stop    stop all containers (data is kept)
+#   launcher.ps1 start      start (first run: setup), wait until ready, open the dashboard window
+#   launcher.ps1 stop       stop all containers (data is kept)
+#   launcher.ps1 app        start from the desktop icon (minimized console, errors as a dialog);
+#                           opens the interactive start only when something has to be entered
+#   launcher.ps1 shortcut   create the SOLARBITER desktop icon again
+#
+# The first successful start creates the desktop icon. The dashboard opens as its own app window
+# (Edge/Chrome/Brave in app mode) or, without one of those, in the default browser.
 #
 # Compatible with Windows PowerShell 5.1. Everything runs in Docker. Secrets are written only to
 # .env (git-ignored); the dashboard password is passed via stdin, never as an argument.
-param([ValidateSet('start', 'stop')][string]$Action = 'start')
+param([ValidateSet('start', 'stop', 'app', 'shortcut')][string]$Action = 'start')
 
 # Native tools write progress to stderr; with 'Stop' Windows PowerShell 5.1 would treat that as an error.
 $ErrorActionPreference = 'Continue'
@@ -18,12 +24,48 @@ Set-Location -LiteralPath $Root
 $EnvPath = Join-Path $Root '.env'
 $DockerUrl = 'https://www.docker.com/products/docker-desktop/'
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+$script:Gui = $false        # started from the desktop icon: errors as a dialog
+$script:FirstRun = $false   # .env was created in this run
 
 function Info([string]$msg) { Write-Host ''; Write-Host "==> $msg" -ForegroundColor Cyan }
 function Fail([string]$msg) {
     Write-Host ''
     Write-Host "FEHLER: $msg" -ForegroundColor Red
+    if ($script:Gui) {
+        try { $null = (New-Object -ComObject WScript.Shell).Popup("$msg`n`nDetails: »SOLARBITER starten.bat« im Ordner $Root doppelklicken.", 0, 'SOLARBITER', 16) } catch { }
+    }
     exit 1
+}
+
+# Dashboard as its own window: a Chromium-based browser in app mode (no tabs, no address bar).
+function Open-AppWindow([string]$url) {
+    foreach ($browser in @('msedge', 'chrome', 'brave')) {
+        try { Start-Process -FilePath $browser -ArgumentList "--app=$url" -ErrorAction Stop; return } catch { }
+    }
+    try { Start-Process $url } catch { Write-Host "Dashboard: $url" }
+}
+
+# Desktop icon that starts SOLARBITER without the setup console (created locally, so no download warning).
+function New-DesktopShortcut {
+    try {
+        $desktop = [Environment]::GetFolderPath('Desktop')
+        $shell = New-Object -ComObject WScript.Shell
+        $link = $shell.CreateShortcut((Join-Path $desktop 'SOLARBITER.lnk'))
+        $link.TargetPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $link.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Minimized -File `"$PSCommandPath`" app"
+        $link.WorkingDirectory = $Root
+        $link.IconLocation = (Join-Path $Root 'scripts\launcher\assets\solarbiter.ico') + ',0'
+        $link.Description = 'SOLARBITER starten'
+        $link.WindowStyle = 7
+        $link.Save()
+        Write-Host "Desktop-Symbol »SOLARBITER« angelegt (lässt sich an die Taskleiste anheften)."
+    } catch {
+        Write-Host "Desktop-Symbol konnte nicht angelegt werden: $($_.Exception.Message)"
+    }
+}
+function Start-Interactive {
+    Start-Process -FilePath (Join-Path $Root 'SOLARBITER starten.bat') -WorkingDirectory $Root
+    exit 0
 }
 
 # --- .env helpers (values are taken literally) -----------------------------------------------------
@@ -67,6 +109,11 @@ function ConvertTo-Plain([System.Security.SecureString]$secure) {
     finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
 }
 
+function Get-BaseUrl {
+    $port = Get-EnvValue 'HTTP_PORT'
+    if ($port -eq '') { $port = '8788' }
+    return "http://127.0.0.1:$port"
+}
 function Test-Http([string]$url) {
     try { $null = Invoke-WebRequest -UseBasicParsing -Uri $url -TimeoutSec 3; return $true } catch { return $false }
 }
@@ -116,6 +163,7 @@ function Initialize-Env {
         Fail 'Ersteinrichtung abgebrochen.'
     }
     Info 'Ersteinrichtung'
+    $script:FirstRun = $true
     $template = [System.IO.File]::ReadAllText((Join-Path $Root '.env.example')) -replace "`r`n", "`n"
     [System.IO.File]::WriteAllText($EnvPath, $template, $Utf8NoBom)
     Set-EnvValue 'POSTGRES_PASSWORD' (New-RandomHex 20)
@@ -177,16 +225,18 @@ function Start-Solarbiter {
     Initialize-Env
     $null = New-Item -ItemType Directory -Force -Path (Join-Path $Root 'secrets')
 
-    Info 'Starte SOLARBITER (beim ersten Mal wird das Programm gebaut - das dauert einige Minuten) …'
-    & docker compose up -d --build --remove-orphans
-    if ($LASTEXITCODE -ne 0) {
-        & docker compose logs --tail 40 migrate api worker
-        Fail 'Start fehlgeschlagen (Details oben).'
+    $base = Get-BaseUrl
+    if (Test-Http "$base/api/health") {
+        # already running: never restart a running bot just to open the window
+        Info 'SOLARBITER läuft bereits.'
+    } else {
+        Info 'Starte SOLARBITER (beim ersten Mal wird das Programm gebaut - das dauert einige Minuten) …'
+        & docker compose up -d --build --remove-orphans
+        if ($LASTEXITCODE -ne 0) {
+            & docker compose logs --tail 40 migrate api worker
+            Fail 'Start fehlgeschlagen (Details oben).'
+        }
     }
-
-    $port = Get-EnvValue 'HTTP_PORT'
-    if ($port -eq '') { $port = '8788' }
-    $base = "http://127.0.0.1:$port"
     Info 'Warte auf das Dashboard …'
     $waited = 0
     while (-not (Test-Http "$base/api/health")) {
@@ -202,11 +252,35 @@ function Start-Solarbiter {
 
     Info "SOLARBITER läuft: $base"
     & docker compose ps --format 'table {{.Service}}\t{{.Status}}'
-    try { Start-Process $base } catch { }
+    if ($script:FirstRun) { New-DesktopShortcut }
+    Open-AppWindow $base
     Write-Host ''
     Write-Host 'Der Bot läuft im Hintergrund weiter (Paper-Modus), auch wenn du dieses Fenster schließt.'
     Write-Host 'Beenden: Doppelklick auf "SOLARBITER stoppen". Echtgeld bleibt gesperrt, bis du es'
     Write-Host 'nach erfolgreicher Validierung im Dashboard selbst freigibst.'
+    Start-Sleep -Seconds 4
+}
+
+function Start-App {
+    $script:Gui = $true
+    if (-not (Test-Path -LiteralPath $EnvPath)) { Start-Interactive }
+    $base = Get-BaseUrl
+    if (-not (Test-Http "$base/api/health")) {
+        Write-Host 'SOLARBITER startet …'
+        Confirm-Docker
+        $null = New-Item -ItemType Directory -Force -Path (Join-Path $Root 'secrets')
+        & docker compose up -d --build --remove-orphans
+        if ($LASTEXITCODE -ne 0) { Fail 'Start fehlgeschlagen.' }
+    }
+    $waited = 0
+    while (-not (Test-Http "$base/api/health")) {
+        if ($waited -ge 180) { Fail "Das Dashboard antwortet nicht unter $base." }
+        Start-Sleep -Seconds 2
+        $waited += 2
+    }
+    try { $status = Invoke-RestMethod -UseBasicParsing -Uri "$base/api/auth/status" -TimeoutSec 5 } catch { $status = $null }
+    if ($status -and $status.setupRequired) { Start-Interactive }
+    Open-AppWindow $base
 }
 
 function Stop-Solarbiter {
@@ -221,5 +295,10 @@ function Stop-Solarbiter {
     Write-Host 'SOLARBITER ist gestoppt. Alle Daten (Datenbank, Einstellungen, Trades) bleiben erhalten.'
 }
 
-if ($Action -eq 'stop') { Stop-Solarbiter } else { Start-Solarbiter }
+switch ($Action) {
+    'stop' { Stop-Solarbiter }
+    'app' { Start-App }
+    'shortcut' { New-DesktopShortcut }
+    default { Start-Solarbiter }
+}
 exit 0

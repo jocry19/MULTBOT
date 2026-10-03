@@ -3,3 +3,4 @@
 *.bat -text
 *.png binary
 *.ico binary
+*.icns binary

@@ -34,22 +34,31 @@ Echtgeld **erst nach bestandener Validierung und ausdrücklicher manueller Freig
 Einzige Voraussetzung: [Docker Desktop](https://www.docker.com/products/docker-desktop/) (kostenlos)
 installieren und einmal starten. Dann im Ordner `solarbiter`:
 
-| | Starten | Stoppen |
-|---|---|---|
-| **Windows** | `SOLARBITER starten.bat` | `SOLARBITER stoppen.bat` |
-| **macOS** | `SOLARBITER starten.command` | `SOLARBITER stoppen.command` |
-| **Linux** | einmal `bash scripts/launcher/launcher.sh desktop` → Anwendungsmenü | ebenso |
+| | Erster Start | Danach | Stoppen |
+|---|---|---|---|
+| **Windows** | `SOLARBITER starten.bat` | Desktop-Symbol **SOLARBITER** | `SOLARBITER stoppen.bat` |
+| **macOS** | `SOLARBITER starten.command` | App **SOLARBITER** auf dem Schreibtisch | `SOLARBITER stoppen.command` |
+| **Linux** | `bash scripts/launcher/launcher.sh start` | Anwendungsmenü → SOLARBITER starten | Anwendungsmenü → SOLARBITER stoppen |
 
 Beim **ersten Start** fragt das Fenster nach der RPC-URL (z. B. Helius) und optional nach einem
 Jupiter-Key, legt die `.env` mit einem zufälligen Datenbank-Passwort an, baut das Programm (einige
-Minuten, nur beim ersten Mal) und fragt nach Benutzername und Passwort fürs Dashboard. Danach öffnet
-sich das Dashboard im Browser (`http://127.0.0.1:8788`). Der Bot läuft im Hintergrund weiter, bis du
-„SOLARBITER stoppen“ doppelklickst; die Daten bleiben erhalten.
+Minuten, nur beim ersten Mal), fragt nach Benutzername und Passwort fürs Dashboard und legt das
+**SOLARBITER-Symbol** an. Ab dann genügt ein Doppelklick auf das Symbol: Es startet ohne
+Konsolenfenster, und das Dashboard öffnet sich als **eigenes App-Fenster** (ohne Tabs und
+Adressleiste, über Edge, Chrome, Brave oder Chromium; sonst im Standardbrowser). Läuft der Bot bereits,
+öffnet der Doppelklick nur das Fenster und startet nichts neu. Das Symbol lässt sich an die Taskleiste
+anheften bzw. ins Dock ziehen; fehlt es, legt `launcher.sh shortcut` bzw. `launcher.ps1 shortcut` es
+neu an.
+
+Der Bot läuft im Hintergrund weiter, auch wenn das Fenster zu ist, bis du „SOLARBITER stoppen“
+doppelklickst; die Daten bleiben erhalten. Nach einem Update: stoppen, dann neu starten.
 
 - **macOS**: Bei „kann nicht geöffnet werden, da es von einem nicht verifizierten Entwickler stammt“
   einmal *Systemeinstellungen → Datenschutz & Sicherheit → Trotzdem öffnen* wählen. Fehlt das
-  Ausführungsrecht (ZIP-Download): `chmod +x *.command` im Terminal im Ordner `solarbiter`.
+  Ausführungsrecht (ZIP-Download): `chmod +x *.command` im Terminal im Ordner `solarbiter`. Die App auf
+  dem Schreibtisch entsteht lokal und braucht diese Freigabe nicht.
 - **Windows**: Bei der SmartScreen-Warnung *Weitere Informationen → Trotzdem ausführen*.
+- Probleme beim Start ohne Fenster stehen in `logs/launcher.log`.
 
 ## Schnellstart (lokal, für Entwickler)
 
