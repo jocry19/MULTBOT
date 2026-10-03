@@ -31,6 +31,7 @@ den Header `X-Requested-With: solarbiter`. Antworten: JSON, große Zahlen (Lampo
 |---|---|
 | `POST /api/bot/start` · `POST /api/bot/stop` | RUNNING (Paper/Shadow) bzw. PAUSED |
 | `POST /api/bot/shadow {enabled}` | Shadow-Modus |
+| `POST /api/paper/reset {capitalEur}` | Paper-Konto mit neuem Startkapital neu starten (nur Simulation; Bot muss laufen) |
 | `POST /api/live/enable {confirmation, password}` | nur bei `LIVE_MODE`, Gate `LIVE_READY`, Wallet, keine Breaker, Phrase „ENABLE LIVE TRADING“, korrektes Passwort |
 | `POST /api/live/disable` | sofort `LIVE_LOCKED` |
 | `POST /api/live/level {level, password?}` | senken immer; erhöhen nur +1, nur wenn freigabefähig, mit Passwort |

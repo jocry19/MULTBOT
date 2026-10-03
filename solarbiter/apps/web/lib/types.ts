@@ -21,6 +21,8 @@ export interface PortfolioSnapshot {
 
 export interface PerformanceResponse {
   mode: string;
+  /** paper: start of the current paper account (earlier paper trades are history) */
+  since?: string;
   portfolio: PortfolioSnapshot | null;
   solEur: number | null;
   stats: { trades: number; wins: number; losses: number; net_eur: number; expectancy_eur: number; avg_prediction_error_bps: number; best_eur: number; worst_eur: number; avg_size_eur: number } | null;

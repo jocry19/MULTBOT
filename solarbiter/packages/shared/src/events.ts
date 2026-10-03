@@ -44,7 +44,8 @@ export type ControlCommand =
   | { type: "BREAKER_RESET"; breaker: CircuitBreakerId; actor: string }
   | { type: "SHADOW_SET"; enabled: boolean }
   | { type: "RUN_OPTIMIZATION" }
-  | { type: "REFRESH_WALLET" };
+  | { type: "REFRESH_WALLET" }
+  | { type: "PAPER_RESET"; capitalEur: number; actor: string };
 
 export interface ComponentHealth {
   name: string;

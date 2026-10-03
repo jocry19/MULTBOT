@@ -1,7 +1,7 @@
 import { toCsv, toJson, type TaxRow } from "@solarbiter/tax";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import type { ApiContext } from "../context.js";
+import { paperEpochStart, type ApiContext } from "../context.js";
 
 const bi = (v: unknown): bigint | null => (v === null || v === undefined ? null : BigInt(String(v)));
 
@@ -59,8 +59,9 @@ export async function registerReportRoutes(f: FastifyInstance, ctx: ApiContext):
     const { hours } = z.object({ hours: z.coerce.number().min(1).max(24 * 90).default(24) }).parse(req.query);
     const since = new Date(Date.now() - hours * 3_600_000).toISOString();
     const bucket = hours <= 6 ? "minute" : hours <= 72 ? "hour" : "day";
+    const paperSince = await paperEpochStart(ctx);
     const [equityPaper, equityLive, dailyPnl, oppsOverTime, rejections, spreadHist, predVsReal, slippage, latency, calibration, fees, learningScore] = await Promise.all([
-      ctx.db.many("SELECT ts_closed AS ts, sum(realized_net_eur) OVER (ORDER BY ts_closed, id) AS equity FROM paper_trades WHERE success IS NOT NULL ORDER BY ts_closed"),
+      ctx.db.many("SELECT ts_closed AS ts, sum(realized_net_eur) OVER (ORDER BY ts_closed, id) AS equity FROM paper_trades WHERE success IS NOT NULL AND ts_closed >= $1 ORDER BY ts_closed", [paperSince]),
       ctx.db.many("SELECT COALESCE(ts_confirmed, ts_detected) AS ts, sum(realized_net_eur) OVER (ORDER BY COALESCE(ts_confirmed, ts_detected), id) AS equity FROM live_trades WHERE status IN ('CONFIRMED','FAILED') ORDER BY 1"),
       ctx.db.many(
         `SELECT day, sum(paper) AS paper, sum(live) AS live FROM (

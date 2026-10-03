@@ -35,3 +35,12 @@ export const DEFAULT_LIVE_GATE: LiveGateRecord = { state: "LIVE_LOCKED", readyAt
 
 /** The exact phrase the user must type to enable real-money trading. */
 export const LIVE_CONFIRMATION_PHRASE = "ENABLE LIVE TRADING";
+
+/** Start of the current paper epoch: the virtual account restarts from `lamports` at `at`; paper
+ * trades closed before `at` stay in the history but no longer count for the paper account. */
+export interface PaperStartRecord {
+  lamports: string;
+  solEur: number;
+  at: number;
+  capitalEur?: number;
+}

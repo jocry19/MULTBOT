@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { TimeChart } from "@/components/charts";
 import { useShell } from "@/components/shell";
-import { Button, Card, ErrorBox, Kpi, PageTitle, Pnl, Table } from "@/components/ui";
+import { Button, Card, ErrorBox, Field, Kpi, PageTitle, Pnl, Table, inputNarrow } from "@/components/ui";
 import { api, useApi } from "@/lib/api";
 import { ago, bps, eur, ms, pct, sol } from "@/lib/format";
 import type { ChartsResponse, PerformanceResponse } from "@/lib/types";
@@ -21,6 +21,17 @@ export default function Paper() {
   const equity = useMemo(() => [{ name: "Paper", kind: "area" as const, data: (charts?.equityPaper ?? []).map((x) => ({ t: x.ts, v: x.equity })) }], [charts]);
   const shadow = status?.worker?.shadow ?? false;
   const toggleShadow = () => api("/api/bot/shadow", { method: "POST", body: { enabled: !shadow } }).catch((e: Error) => setErr(e.message));
+  const [capital, setCapital] = useState("");
+  const [confirming, setConfirming] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const capitalEur = Number(capital.replace(",", "."));
+  const capitalOk = Number.isFinite(capitalEur) && capitalEur >= 1 && capitalEur <= 1_000_000;
+  const resetPaper = () => {
+    setErr(null);
+    api("/api/paper/reset", { method: "POST", body: { capitalEur } })
+      .then(() => { setMsg(`Paper-Konto startet neu mit ${eur(capitalEur)}.`); setConfirming(false); setCapital(""); })
+      .catch((e: Error) => { setErr(e.message); setConfirming(false); });
+  };
   return (
     <div className="space-y-4">
       <PageTitle
@@ -39,6 +50,23 @@ export default function Paper() {
         <Kpi label="Ø Prognosefehler" value={bps(s?.avg_prediction_error_bps)} sub="erwartet − realisiert" />
         <Kpi label="Fehlschläge in Folge" value={p?.consecutiveFailures ?? "–"} tone={(p?.consecutiveFailures ?? 0) > 0 ? "warn" : null} />
       </div>
+      <Card title="Paper-Konto neu starten">
+        <div className="flex flex-wrap items-end gap-3">
+          <Field label="Neues Startkapital (EUR)" hint={perf?.since ? `aktuelles Konto seit ${new Date(perf.since).toLocaleString("de-DE")}` : undefined}>
+            <input id="paper-capital" className={`${inputNarrow} w-36`} inputMode="decimal" placeholder="z. B. 300" value={capital} onChange={(e) => { setCapital(e.target.value); setConfirming(false); setMsg(null); }} />
+          </Field>
+          {!confirming ? (
+            <Button disabled={!capitalOk} onClick={() => setConfirming(true)}>Neu starten …</Button>
+          ) : (
+            <>
+              <Button tone="primary" onClick={resetPaper}>Ja, mit {eur(capitalEur)} neu starten</Button>
+              <Button onClick={() => setConfirming(false)}>Abbrechen</Button>
+            </>
+          )}
+        </div>
+        <p className="mt-2 text-[11px] text-mute">Nur Simulation, kein Echtgeld. Bisherige Paper-Trades bleiben gespeichert (Verlauf, Learning); Kapital, Ergebnis und Kennzahlen zählen ab dem Neustart. Größere Trades erst, wenn du unter Einstellungen „maxTradeEur“ und die Trade-Größen erhöhst (Passwort nötig).</p>
+        {msg && <p className="mt-1 text-[12px] text-good">{msg}</p>}
+      </Card>
       <Card title="Equity-Kurve (realisierte Paper-Ergebnisse, EUR)">
         <TimeChart series={equity} format={(v) => `${v.toFixed(4)} €`} />
       </Card>

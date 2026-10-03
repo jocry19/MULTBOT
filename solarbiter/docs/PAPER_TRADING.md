@@ -37,3 +37,16 @@ zwischen prognostiziertem und realisiertem Ergebnis gemessen; ist live um mehr a
 
 Einschalten unter *Paper Trading → Shadow-Modus an*. Voraussetzung: konfiguriertes, gedecktes
 Bot-Wallet (die Simulation braucht echtes Guthaben). Nichts wird signiert oder gesendet.
+
+## Paper-Konto neu starten (anderes Startkapital)
+
+*Paper Trading → Paper-Konto neu starten*: neues Startkapital eingeben (z. B. 300 €) und bestätigen
+(`POST /api/paper/reset {capitalEur}`; der Bot muss laufen, weil der SOL/EUR-Kurs gebraucht wird).
+Das virtuelle Konto startet sofort neu, ohne Neustart des Bots. Frühere Paper-Trades bleiben
+gespeichert (Verlauf, Learning); Kapital, Equity-Kurve und Kennzahlen zählen ab dem Neustart. Echtgeld
+ist davon nicht betroffen.
+
+Mehr Kapital allein ändert die Trade-Größe nicht: Die Obergrenze ist das Minimum aus `maxTradeEur`,
+Kapital-Skalierung (≥ 100 € → 20 €) und Reserve. Für größere Paper-Trades unter *Einstellungen*
+`capital.maxTradeEur` und `strategy.tradeSizesEur` erhöhen (Risikoerhöhung, darum mit Passwort). Live
+bleibt zusätzlich durch das Live-Level begrenzt (1 / 2 / 3 / 5 €).

@@ -3,7 +3,8 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { STATE_KEYS, StateStore, createTestDatabase, type Database } from "@solarbiter/database";
-import { RedisBus, loadConfig, silentLogger } from "@solarbiter/shared/node";
+import { eurToLamports } from "@solarbiter/shared";
+import { KEY_WORKER_HEARTBEAT, KEY_WORKER_STATUS, RedisBus, loadConfig, silentLogger } from "@solarbiter/shared/node";
 import type { FastifyInstance } from "fastify";
 import { Auth } from "./auth.js";
 import { buildServer } from "./server.js";
@@ -96,6 +97,27 @@ describe("API", () => {
     expect(csv.body.split("\n")[0]).toMatch(/Keine Steuerberatung/);
     const w = await app.inject({ method: "GET", url: "/api/wallet", headers: { cookie } });
     expect(w.body).not.toMatch(/secret|privateKey|keystore|passphrase/i);
+  });
+
+  it("restarts the paper account with a new capital (paper only, history kept)", async () => {
+    expect((await app.inject({ method: "POST", url: "/api/paper/reset", headers: { ...H, cookie }, payload: { capitalEur: 0 } })).statusCode).toBe(400);
+    // the SOL/EUR price comes from the running worker's status
+    await bus.setJson(KEY_WORKER_STATUS, { solEur: 100, wallet: { configured: false }, breakers: [] }, 3);
+    await bus.setJson(KEY_WORKER_HEARTBEAT, { ts: Date.now() }, 3);
+    const maxTradeBefore = store.get().capital.maxTradeEur;
+    const r = await app.inject({ method: "POST", url: "/api/paper/reset", headers: { ...H, cookie }, payload: { capitalEur: 300 } });
+    expect(r.statusCode).toBe(200);
+    const start = r.json().start;
+    expect(start.capitalEur).toBe(300);
+    expect(BigInt(start.lamports)).toBe(eurToLamports(300, start.solEur));
+    await store.reloadState();
+    expect(store.getState(STATE_KEYS.paperStart, null)).toEqual(start);
+    await store.refresh();
+    expect(store.get().capital.paperCapitalEur).toBe(300);
+    expect(store.get().capital.maxTradeEur).toBe(maxTradeBefore); // the trade size limit is not touched
+    const perf = await app.inject({ method: "GET", url: "/api/paper/performance", headers: { cookie } });
+    expect(perf.json().since).toBe(new Date(start.at).toISOString());
+    await bus.setJson(KEY_WORKER_HEARTBEAT, { ts: 0 }, 3); // back to "no worker" for other tests
   });
 
   it("logout invalidates the session", async () => {

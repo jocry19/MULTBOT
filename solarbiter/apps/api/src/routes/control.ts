@@ -4,11 +4,13 @@ import {
   DEFAULT_EMERGENCY,
   DEFAULT_LIVE_GATE,
   LIVE_CONFIRMATION_PHRASE,
+  eurToLamports,
   isRiskNotIncreased,
   mergeSettings,
   type BotControlState,
   type EmergencyState,
   type LiveGateRecord,
+  type PaperStartRecord,
 } from "@solarbiter/shared";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
@@ -51,6 +53,20 @@ export async function registerControlRoutes(f: FastifyInstance, ctx: ApiContext)
     const { enabled } = z.object({ enabled: z.boolean() }).parse(req.body);
     await control(ctx, { type: "SHADOW_SET", enabled }, [[STATE_KEYS.shadow, enabled]], actorOf(req));
     return { ok: true, note: enabled ? "SHADOW needs a configured, funded bot wallet (simulation only — nothing is sent)." : "PAPER" };
+  });
+
+  // --- paper ----------------------------------------------------------------------------------------
+  // Restart the virtual paper account with a new capital. Earlier paper trades stay in the history
+  // (and in learning); the paper account and its key figures count only from now on. No real money.
+  f.post("/api/paper/reset", async (req, reply) => {
+    const { capitalEur } = z.object({ capitalEur: z.number().min(1).max(1_000_000) }).parse(req.body);
+    const { status, online } = await workerStatus(ctx);
+    const solEur = online ? (status?.solEur ?? null) : null;
+    if (!solEur) return reply.code(409).send({ error: "the bot must be running with a SOL/EUR price to restart the paper account" });
+    const start: PaperStartRecord = { lamports: eurToLamports(capitalEur, solEur).toString(), solEur, at: Date.now(), capitalEur };
+    await ctx.store.update({ capital: { paperCapitalEur: capitalEur } }, `user:${actorOf(req)}`);
+    await control(ctx, { type: "PAPER_RESET", capitalEur, actor: actorOf(req) }, [[STATE_KEYS.paperStart, start]], actorOf(req));
+    return { ok: true, start, note: "Paper account restarted. Earlier paper trades stay in the history." };
   });
 
   // --- live ---------------------------------------------------------------------------------------

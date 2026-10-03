@@ -3,7 +3,7 @@ import { DEFAULT_LIVE_GATE, REJECTION_REASONS, type LiveGateRecord } from "@sola
 import { KEY_MARKETS, KEY_SCANNER_TABLE, KEY_WORKER_LEARNING, KEY_WORKER_PORTFOLIO, KEY_WORKER_RISK, KEY_WORKER_STARTUP } from "@solarbiter/shared/node";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { workerStatus, type ApiContext } from "../context.js";
+import { paperEpochStart, workerStatus, type ApiContext } from "../context.js";
 import { explainOpportunity, type OpportunityRow } from "../explain.js";
 
 const windowSchema = z.object({ hours: z.coerce.number().min(1).max(24 * 90).default(24) });
@@ -103,15 +103,18 @@ export async function registerReadRoutes(f: FastifyInstance, ctx: ApiContext): P
     f.get(`/api/${mode}/performance`, async () => {
       const snap = await ctx.bus.getJson<Record<string, unknown>>(KEY_WORKER_PORTFOLIO).catch(() => null);
       const tsCol = mode === "paper" ? "ts_closed" : "COALESCE(ts_confirmed, ts_detected)";
-      const okCond = mode === "paper" ? "success IS NOT NULL" : "status IN ('CONFIRMED','FAILED')";
+      // paper counts only the current paper account (since its last restart); live counts everything
+      const since = mode === "paper" ? await paperEpochStart(ctx) : new Date(0);
+      const okCond = `${mode === "paper" ? "success IS NOT NULL" : "status IN ('CONFIRMED','FAILED')"} AND ${tsCol} >= $1`;
       const stats = await ctx.db.one(
         `SELECT count(*)::int AS trades, count(*) FILTER (WHERE realized_net_eur > 0)::int AS wins, count(*) FILTER (WHERE realized_net_eur < 0)::int AS losses,
                 COALESCE(sum(realized_net_eur), 0) AS net_eur, COALESCE(avg(realized_net_eur), 0) AS expectancy_eur, COALESCE(avg(prediction_error_bps), 0) AS avg_prediction_error_bps,
                 COALESCE(max(realized_net_eur), 0) AS best_eur, COALESCE(min(realized_net_eur), 0) AS worst_eur, COALESCE(avg(size_eur), 0) AS avg_size_eur
            FROM ${table} WHERE ${okCond}`,
+        [since],
       );
-      const daily = await ctx.db.many(`SELECT date_trunc('day', ${tsCol}) AS day, sum(realized_net_eur) AS net_eur, count(*)::int AS trades FROM ${table} WHERE ${okCond} GROUP BY 1 ORDER BY 1`);
-      return { mode, portfolio: snap ? (snap as Record<string, unknown>)[mode] : null, solEur: snap?.solEur ?? null, stats, daily };
+      const daily = await ctx.db.many(`SELECT date_trunc('day', ${tsCol}) AS day, sum(realized_net_eur) AS net_eur, count(*)::int AS trades FROM ${table} WHERE ${okCond} GROUP BY 1 ORDER BY 1`, [since]);
+      return { mode, since: since.toISOString(), portfolio: snap ? (snap as Record<string, unknown>)[mode] : null, solEur: snap?.solEur ?? null, stats, daily };
     });
     f.get(`/api/${mode}/trades`, async (req) => {
       const { limit } = z.object({ limit: z.coerce.number().int().min(1).max(500).default(100) }).parse(req.query);

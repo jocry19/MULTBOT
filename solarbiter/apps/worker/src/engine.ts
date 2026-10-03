@@ -32,6 +32,7 @@ import {
   type LiveGateRecord,
   type LiveLevel,
   type Opportunity,
+  type PaperStartRecord,
   type PoolInfo,
   type TradeMode,
   type WorkerStatus,
@@ -115,6 +116,7 @@ export class TradingEngine {
   private readonly tasks: PeriodicTask[] = [];
   private initTask: PeriodicTask | null = null;
   private paper!: Portfolio;
+  private paperEpochAt = 0;
   private live!: Portfolio;
   private readonly queue: CandidateQueue;
   private evaluator!: OpportunityEvaluator;
@@ -308,13 +310,12 @@ export class TradingEngine {
     }, (r) => `${r.samples} samples, ${r.opps} paper opportunities`);
     await this.step("portfolios", async () => {
       const solEur = rt.fx.price() as number;
-      let start = rt.store.getState<{ lamports: string; solEur: number; at: number } | null>(STATE_KEYS.paperStart, null);
+      let start = rt.store.getState<PaperStartRecord | null>(STATE_KEYS.paperStart, null);
       if (!start) {
-        start = { lamports: eurToLamports(rt.settings.capital.paperCapitalEur, solEur).toString(), solEur, at: Date.now() };
+        start = { lamports: eurToLamports(rt.settings.capital.paperCapitalEur, solEur).toString(), solEur, at: Date.now(), capitalEur: rt.settings.capital.paperCapitalEur };
         await rt.store.setState(STATE_KEYS.paperStart, start);
       }
-      this.paper = new Portfolio("paper", BigInt(start.lamports));
-      this.paper.restore(await rt.repo.loadClosedTrades("paper"));
+      await this.loadPaperEpoch(start);
       this.live = new Portfolio("live", rt.wallet.lamports ?? 0n);
       const liveTrades = await rt.repo.loadClosedTrades("live");
       this.live.restore(liveTrades);
@@ -350,6 +351,9 @@ export class TradingEngine {
     this.every("state_reload", 10_000, async () => {
       await this.rt.store.reloadState();
       await this.rt.store.refresh();
+      // a paper reset whose control message got lost is picked up here
+      const start = this.rt.store.getState<PaperStartRecord | null>(STATE_KEYS.paperStart, null);
+      if (start && start.at !== this.paperEpochAt) await this.loadPaperEpoch(start);
     });
   }
 
@@ -916,6 +920,14 @@ export class TradingEngine {
     this.controlChain = this.controlChain.then(() => this.handleControl(cmd)).catch((err) => this.log.error({ err, cmd: cmd.type }, "control command failed"));
   }
 
+  /** The paper account of the current epoch: its start balance plus the trades closed since. */
+  private async loadPaperEpoch(start: PaperStartRecord): Promise<void> {
+    const paper = new Portfolio("paper", BigInt(start.lamports));
+    paper.restore((await this.rt.repo.loadClosedTrades("paper")).filter((t) => t.closedAt >= start.at));
+    this.paper = paper;
+    this.paperEpochAt = start.at;
+  }
+
   private async handleControl(cmd: ControlCommand): Promise<void> {
     const rt = this.rt;
     if (!this.ready) return;
@@ -951,6 +963,12 @@ export class TradingEngine {
       case "REFRESH_WALLET":
         await this.walletTick();
         break;
+      case "PAPER_RESET": {
+        const start = rt.store.getState<PaperStartRecord | null>(STATE_KEYS.paperStart, null);
+        if (start && start.at !== this.paperEpochAt) await this.loadPaperEpoch(start);
+        await this.event("info", "paper", `paper account restarted with ${cmd.capitalEur} € by ${cmd.actor}`, { capitalEur: cmd.capitalEur });
+        break;
+      }
       case "LIVE_ENABLE":
         await rt.repo.riskEvent("live_enable", "warning", `live trading enabled by ${cmd.actor} (level ${rt.settings.risk.liveLevel})`, { mode: "live" });
         await rt.notifications.notify({ type: "LIVE_UNLOCK", severity: "warning", title: "LIVE TRADING ENABLED", message: `by ${cmd.actor}, level ${rt.settings.risk.liveLevel}` });

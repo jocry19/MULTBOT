@@ -1,5 +1,5 @@
-import type { Database, StateStore } from "@solarbiter/database";
-import type { ControlCommand, WorkerStatus } from "@solarbiter/shared";
+import { STATE_KEYS, type Database, type StateStore } from "@solarbiter/database";
+import type { ControlCommand, PaperStartRecord, WorkerStatus } from "@solarbiter/shared";
 import { KEY_WORKER_HEARTBEAT, KEY_WORKER_STATUS, type AppConfig, type RedisBus } from "@solarbiter/shared/node";
 import type { Logger } from "pino";
 import type { Auth } from "./auth.js";
@@ -22,6 +22,13 @@ export async function workerStatus(ctx: ApiContext): Promise<{ status: WorkerSta
   } catch {
     return { status: null, heartbeatAgeMs: null, online: false };
   }
+}
+
+/** Start of the current paper epoch (paper results before it belong to an earlier paper account). */
+export async function paperEpochStart(ctx: ApiContext): Promise<Date> {
+  await ctx.store.reloadState();
+  const start = ctx.store.getState<PaperStartRecord | null>(STATE_KEYS.paperStart, null);
+  return new Date(start?.at ?? 0);
 }
 
 /**
