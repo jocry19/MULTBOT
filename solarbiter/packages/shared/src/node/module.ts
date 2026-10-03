@@ -31,7 +31,7 @@ export class PeriodicTask {
 
   constructor(
     readonly name: string,
-    private readonly intervalMs: number,
+    private intervalMs: number,
     private readonly fn: () => Promise<void>,
     private readonly log: Logger,
     private readonly opts: { runImmediately?: boolean; maxBackoffMs?: number; onError?: (err: unknown) => void } = {},
@@ -51,6 +51,20 @@ export class PeriodicTask {
 
   get isRunning(): boolean {
     return this.running;
+  }
+
+  get interval(): number {
+    return this.intervalMs;
+  }
+
+  /** Change the interval at runtime; a pending wait is restarted with the new interval. */
+  setIntervalMs(ms: number): void {
+    if (ms === this.intervalMs) return;
+    this.intervalMs = ms;
+    if (this.timer && !this.running && !this.stopped) {
+      clearTimeout(this.timer);
+      this.schedule(ms);
+    }
   }
 
   /** Run now (if not already running). Resolves when the run completes. */

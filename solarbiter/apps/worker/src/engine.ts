@@ -374,6 +374,8 @@ export class TradingEngine {
   private applySettings(s: typeof this.rt.settings): void {
     this.rt.settings = s;
     this.queue.configure({ maxPerMinute: s.scanner.maxCandidatesPerMinute, maxAgeMs: Math.max(10_000, s.scanner.poolPollMs * 10) });
+    this.task("scan")?.setIntervalMs(s.scanner.poolPollMs);
+    this.task("discovery")?.setIntervalMs(s.scanner.poolRefreshMin * 60_000);
     this.rt.tokens.applyPolicy({ allowlist: s.risk.tokenAllowlist, denylist: s.risk.tokenDenylist });
     if (this.levelStats.level !== s.risk.liveLevel) this.levelStats = { level: s.risk.liveLevel, netEur: [], failures: 0, attempts: 0, consecutiveFailures: 0, drawdownEur: 0, liveVsPaperBps: null, devBps: [] };
   }

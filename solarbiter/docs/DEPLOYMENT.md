@@ -44,4 +44,9 @@ Als Dienste z. B. per systemd (`Restart=always`); beide Prozesse beenden sich sa
 - **Backups**: `docker compose exec -T postgres sh /backup/backup.sh` (z. B. täglich per Cron).
 - **Updates**: `docker compose up -d --build` — Migrationen laufen automatisch und idempotent.
 - **RPC**: für ernsthaften Betrieb einen dedizierten RPC mit Fallback (`SOLANA_RPC_FALLBACK_URLS`) und
-  einen Jupiter-Key (höheres Quote-Budget) verwenden.
+  einen Jupiter-Key (höheres Quote-Budget) verwenden. Helius-Endpunkte werden erkannt und bevorzugt.
+- **RPC-Verbrauch** (gemessen gegen Helius, ohne Wallet): mit `scanner.poolPollMs = 2000` etwa
+  40 Aufrufe/min (≈ 1,7 Mio./Monat), mit `6000` etwa 21/min (≈ 0,9 Mio./Monat). Die übrigen Aufrufe
+  (Health-Check alle 10 s, Priority-Fees alle 10 s) sind fix. Der kostenlose Helius-Plan hat
+  1 Mio. Credits/Monat und 10 Anfragen/s (`RPC_REQUESTS_PER_SECOND=8` bleibt darunter) — dort
+  `poolPollMs` auf mindestens 6000 setzen (Einstellungen → Scanner; wirkt ohne Neustart).
