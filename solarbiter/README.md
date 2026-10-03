@@ -29,7 +29,29 @@ Echtgeld **erst nach bestandener Validierung und ausdrücklicher manueller Freig
 - **Dashboard** (Next.js, Terminal-Stil) mit Live-Scanner, „Warum kein Trade?“, Erklärung jeder
   Entscheidung, 12 Charts, Steuer-Export (FIFO, EUR — keine Steuerberatung) und EMERGENCY STOP.
 
-## Schnellstart (lokal)
+## Start per Doppelklick
+
+Einzige Voraussetzung: [Docker Desktop](https://www.docker.com/products/docker-desktop/) (kostenlos)
+installieren und einmal starten. Dann im Ordner `solarbiter`:
+
+| | Starten | Stoppen |
+|---|---|---|
+| **Windows** | `SOLARBITER starten.bat` | `SOLARBITER stoppen.bat` |
+| **macOS** | `SOLARBITER starten.command` | `SOLARBITER stoppen.command` |
+| **Linux** | einmal `bash scripts/launcher/launcher.sh desktop` → Anwendungsmenü | ebenso |
+
+Beim **ersten Start** fragt das Fenster nach der RPC-URL (z. B. Helius) und optional nach einem
+Jupiter-Key, legt die `.env` mit einem zufälligen Datenbank-Passwort an, baut das Programm (einige
+Minuten, nur beim ersten Mal) und fragt nach Benutzername und Passwort fürs Dashboard. Danach öffnet
+sich das Dashboard im Browser (`http://127.0.0.1:8788`). Der Bot läuft im Hintergrund weiter, bis du
+„SOLARBITER stoppen“ doppelklickst; die Daten bleiben erhalten.
+
+- **macOS**: Bei „kann nicht geöffnet werden, da es von einem nicht verifizierten Entwickler stammt“
+  einmal *Systemeinstellungen → Datenschutz & Sicherheit → Trotzdem öffnen* wählen. Fehlt das
+  Ausführungsrecht (ZIP-Download): `chmod +x *.command` im Terminal im Ordner `solarbiter`.
+- **Windows**: Bei der SmartScreen-Warnung *Weitere Informationen → Trotzdem ausführen*.
+
+## Schnellstart (lokal, für Entwickler)
 
 Voraussetzungen: Node ≥ 22, pnpm 10, PostgreSQL 16, Redis 7.
 

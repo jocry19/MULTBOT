@@ -1,0 +1,5 @@
+# Containers and macOS/Linux need LF; the Windows batch files need CRLF and are stored as-is.
+* text=auto eol=lf
+*.bat -text
+*.png binary
+*.ico binary

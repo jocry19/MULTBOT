@@ -1,5 +1,10 @@
 # Setup
 
+> **Einfachster Weg:** Docker Desktop installieren und `SOLARBITER starten` doppelklicken (`.bat` unter
+> Windows, `.command` unter macOS) — siehe [README](../README.md#start-per-doppelklick). Das Skript
+> (`scripts/launcher/`) richtet `.env` und den Dashboard-Benutzer beim ersten Start ein. Die folgenden
+> Schritte sind für den Betrieb ohne Docker bzw. für Entwicklung.
+
 ## Voraussetzungen
 
 - Node.js ≥ 22, pnpm 10 (`corepack enable`)
