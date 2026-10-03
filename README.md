@@ -10,6 +10,10 @@ möglich, wird aber **ausschließlich durch eine manuelle Aktion** freigeschalte
 > Strategie sei sicher profitabel, und schaltet Echtgeld nie selbstständig ein. Die Steuer-Exporte
 > sind Dokumentation, **keine Steuerberatung**.
 
+> **Zweites Projekt in diesem Repository:** [`solarbiter/`](solarbiter/README.md) — SOLARBITER, ein
+> Solana-Multi-DEX-Arbitrage-Bot (Jupiter, Raydium, Orca, Meteora) mit eigenem Workspace,
+> eigener Datenbank und eigener Dokumentation.
+
 ---
 
 ## Inhalt
