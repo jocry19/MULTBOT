@@ -106,7 +106,10 @@ export class RiskEngine {
   }
 
   sizeCap(ctx: RiskContext): SizeCap {
+    const r = ctx.settings.risk;
+    const feeAllowance = lamportsToEur(BigInt(BASE_FEE_LAMPORTS_PER_SIGNATURE + r.maxPriorityFeeLamports + r.maxJitoTipLamports), ctx.solEur);
     return effectiveMaxTradeEur({
+      feeAllowanceEur: feeAllowance,
       mode: ctx.mode,
       settings: ctx.settings,
       capitalEur: ctx.capitalEur,

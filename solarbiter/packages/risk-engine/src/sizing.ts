@@ -34,6 +34,8 @@ export interface SizingContext {
   lossStreak: number;
   lastTradeSizeEur: number | null;
   lastTradeLost: boolean;
+  /** Worst-case network fees + tip of one attempt (EUR): the reserve must survive them too. */
+  feeAllowanceEur?: number;
 }
 
 export interface SizeCap {
@@ -56,7 +58,7 @@ export function effectiveMaxTradeEur(ctx: SizingContext): SizeCap {
   const components: Record<string, number> = {
     userMax: s.capital.maxTradeEur,
     capitalScaling: scalingCapEur(ctx.capitalEur),
-    reserve: Math.max(0, ctx.capitalEur - s.capital.reserveCapitalEur),
+    reserve: Math.max(0, ctx.capitalEur - s.capital.reserveCapitalEur - (ctx.feeAllowanceEur ?? 0)),
   };
   if (ctx.mode === "live") components.liveLevel = s.risk.liveLevelMaxTradeEur[s.risk.liveLevel - 1] as number;
   if (ctx.liquidityDepthEur !== null) components.liquidity = ctx.liquidityDepthEur * LIQUIDITY_SHARE;

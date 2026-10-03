@@ -76,7 +76,7 @@ describe("RiskEngine.validate", () => {
     expect(reject({}, { consecutiveFailures: 3 })).toContain("RISK_LIMIT");
     // non-atomic worst case: 5 € × (0.5 % slippage + 0.5 % buffer + 5 % inventory risk) + fees > 0.30 €
     const s = mergeSettings(DEFAULT_SETTINGS, { risk: { requireAtomic: false } });
-    const d = new RiskEngine().validate(makeOpportunity({ atomic: false, sizeEur: 5, inputAmount: 41_666_667n }), ctx({ settings: s, balanceLamports: solToLamports(16 / 120) }));
+    const d = new RiskEngine().validate(makeOpportunity({ atomic: false, sizeEur: 5, inputAmount: 41_666_667n }), ctx({ settings: s, balanceLamports: solToLamports(16 / 120), capitalEur: 16 }));
     expect(d.codes).toEqual(["RISK_LIMIT"]);
     expect(d.reasons[0]).toMatch(/worst-case loss/);
     expect(reject({ atomic: false, sizeEur: 1, inputAmount: 8_333_333n }, { settings: s })).toEqual([]);
