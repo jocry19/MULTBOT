@@ -115,7 +115,11 @@ export async function registerControlRoutes(f: FastifyInstance, ctx: ApiContext)
   f.post("/api/emergency-release", async (req, reply) => {
     const { password } = z.object({ password: z.string().min(1).max(500) }).parse(req.body);
     if (!(await requirePassword(ctx, req, reply, password))) return;
-    await control(ctx, { type: "EMERGENCY_RELEASE" }, [[STATE_KEYS.emergency, { ...DEFAULT_EMERGENCY }]], actorOf(req));
+    const g: LiveGateRecord = { ...gate(), stoppedReason: null };
+    await control(ctx, { type: "EMERGENCY_RELEASE" }, [
+      [STATE_KEYS.emergency, { ...DEFAULT_EMERGENCY }],
+      [STATE_KEYS.liveGate, g],
+    ], actorOf(req));
     return { ok: true, note: "Emergency stop released. Live trading stays locked until enabled again." };
   });
 

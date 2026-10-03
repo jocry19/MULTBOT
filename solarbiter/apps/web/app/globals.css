@@ -1,0 +1,74 @@
+@import "tailwindcss";
+
+/* SOLARBITER terminal theme — dark by design. Chart series colours are the validated categorical
+   palette on the chart surface (#1a1a19); status colours are reserved for state and always paired
+   with an icon/label. */
+:root {
+  color-scheme: dark;
+  --bg: #0e0e0d;
+  --surface-1: #1a1a19;
+  --surface-2: #232321;
+  --border: #2e2e2b;
+  --text-primary: #f4f4f1;
+  --text-secondary: #c3c2b7;
+  --text-muted: #8a897f;
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --good: #0ca30c;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+  --accent: #3987e5;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-s1: var(--surface-1);
+  --color-s2: var(--surface-2);
+  --color-line: var(--border);
+  --color-ink: var(--text-primary);
+  --color-ink2: var(--text-secondary);
+  --color-mute: var(--text-muted);
+  --color-good: var(--good);
+  --color-warn: var(--warning);
+  --color-serious: var(--serious);
+  --color-crit: var(--critical);
+  --color-accent: var(--accent);
+  --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, monospace;
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--text-primary);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 13px;
+}
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+table th {
+  font-weight: 500;
+  color: var(--text-muted);
+  text-align: left;
+  white-space: nowrap;
+}
+table td,
+table th {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+table tr:hover td {
+  background: var(--surface-2);
+}
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}

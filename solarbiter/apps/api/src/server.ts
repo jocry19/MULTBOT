@@ -13,7 +13,7 @@ import { registerAuthRoutes } from "./routes/auth.js";
 import { registerControlRoutes } from "./routes/control.js";
 import { registerReadRoutes } from "./routes/read.js";
 import { registerReportRoutes } from "./routes/reports.js";
-import { RateLimiter, rateLimitHook, registerSecurity } from "./security.js";
+import { RateLimiter, inlineScriptHashes, rateLimitHook, registerSecurity } from "./security.js";
 
 export const OPEN_ROUTES = ["/api/auth/login", "/api/auth/status", "/api/health"];
 
@@ -23,7 +23,7 @@ export async function buildServer(ctx: ApiContext): Promise<FastifyInstance> {
   f.decorateRequest("user", null);
   await f.register(cookie);
   await f.register(websocket, { options: { maxPayload: 4_096 } });
-  registerSecurity(f, { corsOrigins: ctx.config.http.corsOrigins, production: ctx.config.env === "production" });
+  registerSecurity(f, { corsOrigins: ctx.config.http.corsOrigins, production: ctx.config.env === "production", scriptHashes: inlineScriptHashes(ctx.config.http.webDistDir) });
   f.addHook("onRequest", rateLimitHook(new RateLimiter()));
   f.addHook("onRequest", apiGuard(ctx.auth, OPEN_ROUTES));
 

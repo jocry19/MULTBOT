@@ -1,9 +1,35 @@
+import { createHash } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 /**
- * Secure headers (CSP, framing, sniffing, referrer, HSTS behind HTTPS) and per-IP rate limits.
- * The dashboard is same-origin; CORS is only answered for explicitly configured origins.
+ * The static dashboard export bootstraps with small inline scripts. Instead of 'unsafe-inline', the
+ * exact SHA-256 hashes of those scripts (read from the build at startup) are allowed.
  */
+export function inlineScriptHashes(distDir: string | undefined): string[] {
+  if (!distDir || !fs.existsSync(distDir)) return [];
+  const hashes = new Set<string>();
+  const walk = (dir: string) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith(".html")) {
+        const html = fs.readFileSync(p, "utf8");
+        for (const m of html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)) {
+          const body = m[1] ?? "";
+          if (body.length) hashes.add(`'sha256-${createHash("sha256").update(body, "utf8").digest("base64")}'`);
+        }
+      }
+    }
+  };
+  walk(distDir);
+  return [...hashes];
+}
+
+export const cspWith = (scriptHashes: string[]): string =>
+  CSP.replace("script-src 'self'", `script-src 'self'${scriptHashes.length ? ` ${scriptHashes.join(" ")}` : ""}`);
+
 export const CSP = [
   "default-src 'self'",
   "script-src 'self'",
@@ -17,9 +43,14 @@ export const CSP = [
   "object-src 'none'",
 ].join("; ");
 
-export function registerSecurity(f: FastifyInstance, opts: { corsOrigins: string[]; production: boolean }): void {
+/**
+ * Secure headers (CSP, framing, sniffing, referrer, HSTS behind HTTPS) and per-IP rate limits.
+ * The dashboard is same-origin; CORS is only answered for explicitly configured origins.
+ */
+export function registerSecurity(f: FastifyInstance, opts: { corsOrigins: string[]; production: boolean; scriptHashes?: string[] }): void {
+  const csp = cspWith(opts.scriptHashes ?? []);
   f.addHook("onSend", async (req, reply, payload) => {
-    reply.header("Content-Security-Policy", CSP);
+    reply.header("Content-Security-Policy", csp);
     reply.header("X-Frame-Options", "DENY");
     reply.header("X-Content-Type-Options", "nosniff");
     reply.header("Referrer-Policy", "no-referrer");
