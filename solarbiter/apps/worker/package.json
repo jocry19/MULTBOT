@@ -1,0 +1,46 @@
+{
+  "name": "@solarbiter/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx --conditions=source src/main.ts",
+    "start": "node dist/main.js",
+    "db:migrate": "tsx --conditions=source src/cli/migrate.ts",
+    "db:seed": "tsx --conditions=source src/cli/seed.ts",
+    "wallet:create": "tsx --conditions=source src/cli/wallet.ts create",
+    "wallet:import": "tsx --conditions=source src/cli/wallet.ts import",
+    "wallet:address": "tsx --conditions=source src/cli/wallet.ts address"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.99.0",
+    "@solarbiter/arbitrage": "workspace:*",
+    "@solarbiter/database": "workspace:*",
+    "@solarbiter/dex": "workspace:*",
+    "@solarbiter/execution-engine": "workspace:*",
+    "@solarbiter/jito": "workspace:*",
+    "@solarbiter/jupiter": "workspace:*",
+    "@solarbiter/learning-engine": "workspace:*",
+    "@solarbiter/meteora": "workspace:*",
+    "@solarbiter/notifications": "workspace:*",
+    "@solarbiter/orca": "workspace:*",
+    "@solarbiter/paper-engine": "workspace:*",
+    "@solarbiter/profit-engine": "workspace:*",
+    "@solarbiter/quotes": "workspace:*",
+    "@solarbiter/raydium": "workspace:*",
+    "@solarbiter/risk-engine": "workspace:*",
+    "@solarbiter/shared": "workspace:*",
+    "@solarbiter/solana": "workspace:*",
+    "@solarbiter/tax": "workspace:*",
+    "@solarbiter/wallet": "workspace:*",
+    "bs58": "^6.0.0",
+    "pino": "^10.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "tsx": "^4.23.15",
+    "typescript": "5.9.3"
+  }
+}

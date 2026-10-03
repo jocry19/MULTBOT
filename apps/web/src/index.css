@@ -1,0 +1,104 @@
+@import "tailwindcss";
+
+/*
+ * MULTBOT terminal design tokens (dark).
+ * Chart/series colours are validated against the chart surface (#101216) with the dataviz
+ * validator: series 1–3 pass all checks; good/critical need secondary encoding (+/− sign,
+ * hollow vs filled candles), which the UI always provides.
+ */
+@theme {
+  --color-page: #0a0b0d;
+  --color-surface: #101216;
+  --color-surface-2: #161920;
+  --color-surface-3: #1d2129;
+  --color-line: rgba(255, 255, 255, 0.08);
+  --color-line-strong: rgba(255, 255, 255, 0.14);
+  --color-ink: #f2f3f5;
+  --color-ink-2: #b4b9c2;
+  --color-muted: #7d848f;
+  --color-grid: #23262d;
+  --color-axis: #33373f;
+  --color-accent: #3987e5;
+  --color-series-1: #3987e5;
+  --color-series-2: #d95926;
+  --color-series-3: #199e70;
+  --color-good: #0ca30c;
+  --color-good-text: #2fbf4a;
+  --color-bad: #e66767;
+  --color-warn: #fab219;
+  --color-serious: #ec835a;
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-page);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* numbers that align in columns */
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #262a32;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.fade-in {
+  animation: fade-in 180ms ease-out;
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.pulse-dot {
+  animation: pulse 1.8s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fade-in,
+  .pulse-dot {
+    animation: none;
+  }
+}

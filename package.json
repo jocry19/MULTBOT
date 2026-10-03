@@ -1,0 +1,23 @@
+{
+  "name": "multbot",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Autonomous Solana memecoin research, strategy discovery, paper and live trading system",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm --filter @multbot/shared build && pnpm --filter @multbot/server build && pnpm --filter @multbot/web build",
+    "dev:server": "pnpm --filter @multbot/server dev",
+    "dev:web": "pnpm --filter @multbot/web dev",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "db:migrate": "pnpm --filter @multbot/server db:migrate",
+    "wallet:create": "pnpm --filter @multbot/server wallet:create",
+    "wallet:import": "pnpm --filter @multbot/server wallet:import",
+    "wallet:address": "pnpm --filter @multbot/server wallet:address",
+    "auth:hash-password": "pnpm --filter @multbot/server auth:hash-password"
+  },
+  "packageManager": "pnpm@10.33.0"
+}

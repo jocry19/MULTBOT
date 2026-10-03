@@ -1,0 +1,20 @@
+node_modules/
+dist/
+.next/
+out/
+build/
+coverage/
+*.tsbuildinfo
+
+# secrets — NEVER commit
+.env
+.env.*
+!.env.example
+secrets/
+*.keystore.json
+*.key
+id.json
+
+logs/
+data/
+*.log

@@ -1,0 +1,85 @@
+# MULTBOT — local / single-server deployment.
+#
+#   cp .env.example .env         # fill in HELIUS_API_KEY, ADMIN_PASSWORD_HASH, POSTGRES_PASSWORD …
+#   docker compose up -d --build
+#   open http://127.0.0.1:8787
+#
+# The dashboard is published on 127.0.0.1 only. For remote access use an SSH tunnel or a reverse
+# proxy with TLS — and always set ADMIN_PASSWORD_HASH.
+
+name: multbot
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: multbot
+      POSTGRES_USER: multbot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    command:
+      - postgres
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - work_mem=32MB
+      - -c
+      - maintenance_work_mem=256MB
+      - -c
+      - max_wal_size=4GB
+      - -c
+      - checkpoint_timeout=15min
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U multbot -d multbot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+  multbot:
+    build: .
+    image: multbot:latest
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 45s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://multbot:${POSTGRES_PASSWORD}@postgres:5432/multbot
+      HTTP_HOST: 0.0.0.0
+      HTTP_PORT: 8787
+    # the keystore must be readable by this uid (default 1000, the image's "node" user)
+    user: "${MULTBOT_UID:-1000}:${MULTBOT_GID:-1000}"
+    ports:
+      - "127.0.0.1:${MULTBOT_PORT:-8787}:8787"
+    volumes:
+      # wallet keystore (+ optional passphrase file) — read-only at runtime
+      - ./secrets:/app/secrets:ro
+      - logs:/app/logs
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+  # one-off tools (wallet keystore, password hash) — no network, secrets/ writable:
+  #   docker compose run --rm cli dist/cli/wallet.js create
+  #   docker compose run --rm cli dist/cli/wallet.js address
+  #   echo -n 'password' | docker compose run --rm -T cli dist/cli/hash-password.js
+  cli:
+    image: multbot:latest
+    profiles: ["tools"]
+    network_mode: none
+    env_file: .env
+    user: "${MULTBOT_UID:-1000}:${MULTBOT_GID:-1000}"
+    entrypoint: ["node"]
+    volumes:
+      - ./secrets:/app/secrets
+
+volumes:
+  pgdata:
+  logs:

@@ -1,0 +1,45 @@
+{
+  "name": "@multbot/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "dev": "tsx watch --conditions=source src/main.ts",
+    "start": "node --enable-source-maps dist/main.js",
+    "build": "tsc -p tsconfig.build.json && node -e \"require('fs').cpSync('src/db/migrations','dist/db/migrations',{recursive:true})\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "db:migrate": "tsx --conditions=source src/cli/migrate.ts",
+    "wallet:create": "tsx --conditions=source src/cli/wallet.ts create",
+    "wallet:import": "tsx --conditions=source src/cli/wallet.ts import",
+    "wallet:address": "tsx --conditions=source src/cli/wallet.ts address",
+    "auth:hash-password": "tsx --conditions=source src/cli/hash-password.ts"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.1.2",
+    "@fastify/static": "^10.1.5",
+    "@fastify/websocket": "^11.3.1",
+    "@multbot/shared": "workspace:*",
+    "@solana/web3.js": "^1.99.0",
+    "bs58": "^6.0.0",
+    "exceljs": "^4.4.0",
+    "fastify": "^5.12.5",
+    "pg": "^8.23.0",
+    "pino": "^10.3.1",
+    "prom-client": "^15.1.3",
+    "ws": "^8.22.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "@types/pg": "^8.23.1",
+    "@types/ws": "^8.18.1",
+    "pino-pretty": "^13.1.3",
+    "tsx": "^4.23.15",
+    "typescript": "5.9.3",
+    "vitest": "^4.1.11"
+  }
+}

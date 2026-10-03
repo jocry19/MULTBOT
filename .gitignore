@@ -1,0 +1,26 @@
+# dependencies & builds
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# environment & secrets — NEVER commit these
+.env
+.env.*
+!.env.example
+secrets/
+*.keystore.json
+*.key
+id.json
+
+# runtime data
+logs/
+data/
+*.log
+
+# editors / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json

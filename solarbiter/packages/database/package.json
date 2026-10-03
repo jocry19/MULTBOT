@@ -1,0 +1,30 @@
+{
+  "name": "@solarbiter/database",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node -e \"require('fs').cpSync('src/migrations','dist/migrations',{recursive:true})\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@solarbiter/shared": "workspace:*",
+    "pg": "^8.23.0",
+    "pino": "^10.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "typescript": "5.9.3",
+    "@types/pg": "^8.15.6"
+  }
+}
