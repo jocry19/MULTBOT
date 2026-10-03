@@ -95,4 +95,6 @@ export const STATE_KEYS = {
   shadow: "shadow",
   activeStrategy: "active_strategy",
   levelEligibility: "level_eligibility",
+  paperStart: "paper_start",
+  walletAddress: "wallet_address",
 } as const;

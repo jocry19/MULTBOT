@@ -88,6 +88,24 @@ describe("candidate queue", () => {
     q.offer([cand("c", 50, t - 20_000)]);
     expect(q.next()).toBeNull(); // stale state
   });
+
+  it("backs off routes whose firm quotes contradict the screening", () => {
+    let t = 0;
+    const q = new CandidateQueue({ maxPerMinute: 100, cooldownMs: 30_000, improvementBps: 5, maxAgeMs: 1e9 }, () => t);
+    q.feedback("x", 36, -76);
+    q.offer([cand("x", 40, 0)]);
+    expect(q.next()).toBeNull();
+    t += 31_000;
+    q.offer([cand("x", 40, 0)]);
+    expect(q.next()?.key).toBe("x");
+    q.feedback("x", 36, -70); // second strike: 60 s
+    t += 31_000;
+    q.offer([cand("x", 40, 0)]);
+    expect(q.next()).toBeNull();
+    expect(q.backedOff()[0]).toMatchObject({ key: "x", strikes: 2 });
+    q.feedback("x", 36, 30); // consistent → reset
+    expect(q.backedOff()).toHaveLength(0);
+  });
 });
 
 /** Fake DEX: quotes from a fixed rate, with linear price impact. */

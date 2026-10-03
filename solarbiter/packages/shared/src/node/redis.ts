@@ -9,6 +9,11 @@ export const KEY_WORKER_STATUS = "sb:worker:status";
 export const KEY_WORKER_HEARTBEAT = "sb:worker:heartbeat";
 export const KEY_SCANNER_TABLE = "sb:scanner:table";
 export const KEY_MARKETS = "sb:markets";
+/** Detail snapshots the worker publishes for the API (portfolio, learning, risk, startup). */
+export const KEY_WORKER_PORTFOLIO = "sb:worker:portfolio";
+export const KEY_WORKER_LEARNING = "sb:worker:learning";
+export const KEY_WORKER_RISK = "sb:worker:risk";
+export const KEY_WORKER_STARTUP = "sb:worker:startup";
 
 /**
  * Redis transport between worker and API: realtime events (pub/sub), control commands (pub/sub,

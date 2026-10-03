@@ -85,7 +85,84 @@ importers:
 
   apps/web: {}
 
-  apps/worker: {}
+  apps/worker:
+    dependencies:
+      '@solana/web3.js':
+        specifier: ^1.99.0
+        version: 1.99.0(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
+      '@solarbiter/arbitrage':
+        specifier: workspace:*
+        version: link:../../packages/arbitrage
+      '@solarbiter/database':
+        specifier: workspace:*
+        version: link:../../packages/database
+      '@solarbiter/dex':
+        specifier: workspace:*
+        version: link:../../packages/dex
+      '@solarbiter/execution-engine':
+        specifier: workspace:*
+        version: link:../../packages/execution-engine
+      '@solarbiter/jito':
+        specifier: workspace:*
+        version: link:../../packages/jito
+      '@solarbiter/jupiter':
+        specifier: workspace:*
+        version: link:../../packages/jupiter
+      '@solarbiter/learning-engine':
+        specifier: workspace:*
+        version: link:../../packages/learning-engine
+      '@solarbiter/meteora':
+        specifier: workspace:*
+        version: link:../../packages/meteora
+      '@solarbiter/notifications':
+        specifier: workspace:*
+        version: link:../../packages/notifications
+      '@solarbiter/orca':
+        specifier: workspace:*
+        version: link:../../packages/orca
+      '@solarbiter/paper-engine':
+        specifier: workspace:*
+        version: link:../../packages/paper-engine
+      '@solarbiter/profit-engine':
+        specifier: workspace:*
+        version: link:../../packages/profit-engine
+      '@solarbiter/quotes':
+        specifier: workspace:*
+        version: link:../../packages/quotes
+      '@solarbiter/raydium':
+        specifier: workspace:*
+        version: link:../../packages/raydium
+      '@solarbiter/risk-engine':
+        specifier: workspace:*
+        version: link:../../packages/risk-engine
+      '@solarbiter/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      '@solarbiter/solana':
+        specifier: workspace:*
+        version: link:../../packages/solana
+      '@solarbiter/tax':
+        specifier: workspace:*
+        version: link:../../packages/tax
+      '@solarbiter/wallet':
+        specifier: workspace:*
+        version: link:../../packages/wallet
+      bs58:
+        specifier: ^6.0.0
+        version: 6.0.0
+      pino:
+        specifier: ^10.3.1
+        version: 10.3.1
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.4
+        version: 22.20.4
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
 
   packages/arbitrage:
     dependencies:
