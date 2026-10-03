@@ -1,0 +1,11 @@
+**/node_modules
+**/dist
+**/.next
+**/out
+**/*.tsbuildinfo
+.env
+.env.*
+secrets
+logs
+*.log
+**/*.keystore.json

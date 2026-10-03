@@ -20,7 +20,12 @@
     "user:create": "pnpm --filter @solarbiter/api user:create",
     "wallet:create": "pnpm --filter @solarbiter/worker wallet:create",
     "wallet:import": "pnpm --filter @solarbiter/worker wallet:import",
-    "wallet:address": "pnpm --filter @solarbiter/worker wallet:address"
+    "wallet:address": "pnpm --filter @solarbiter/worker wallet:address",
+    "docker:build": "docker build -f infrastructure/docker/Dockerfile -t solarbiter:latest .",
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose down",
+    "start:api": "node apps/api/dist/main.js",
+    "start:worker": "node apps/worker/dist/main.js"
   },
   "devDependencies": {
     "@solarbiter/arbitrage": "workspace:*",

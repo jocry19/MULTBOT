@@ -127,7 +127,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const e = envSchema.parse(env);
   let passphrase = e.WALLET_KEYSTORE_PASSPHRASE;
   if (!passphrase && e.WALLET_KEYSTORE_PASSPHRASE_FILE) {
-    passphrase = fs.readFileSync(path.resolve(baseDir, e.WALLET_KEYSTORE_PASSPHRASE_FILE), "utf8").trim();
+    // missing file = no wallet (paper only); never crash the process because of it
+    const pf = path.resolve(baseDir, e.WALLET_KEYSTORE_PASSPHRASE_FILE);
+    if (fs.existsSync(pf)) passphrase = fs.readFileSync(pf, "utf8").trim() || undefined;
   }
   const rpcUrls = [e.SOLANA_RPC_URL, ...e.SOLANA_RPC_FALLBACK_URLS];
   for (const s of [e.JUPITER_API_KEY, e.JITO_AUTH, passphrase, e.NOTIFY_WEBHOOK_URL, ...rpcUrls, e.SOLANA_WS_URL, e.DATABASE_URL, e.REDIS_URL]) {
