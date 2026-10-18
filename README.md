@@ -11,13 +11,48 @@ Terminal-Dashboard im Bloomberg-Stil.
 
 ---
 
-## Schnellstart
+## App öffnen – per Doppelklick
+
+Voraussetzung ist Python 3.10 oder neuer ([python.org](https://www.python.org/downloads/), unter Windows den
+Haken bei „Add python.exe to PATH“ setzen). Danach brauchst du keine Kommandozeile mehr:
+
+| System | Starten |
+|---|---|
+| **Windows** | `MULTBOT.bat` doppelklicken |
+| **macOS** | `MULTBOT.command` doppelklicken (beim ersten Mal: Rechtsklick → Öffnen) |
+| **Linux** | `./start.sh` |
+
+Beim ersten Start legt das Skript selbst eine Python-Umgebung (`.venv`) an und installiert alle Pakete. Danach
+öffnet sich das Terminal als **eigenes App-Fenster** ohne Tabs und Adressleiste, sofern Chrome, Edge oder
+Brave installiert ist. Sonst öffnet es sich im Standardbrowser. Das schwarze Konsolenfenster zeigt das Log.
+Schließt du es, ist der Bot beendet.
+
+Ein zweiter Doppelklick, während der Bot schon läuft, öffnet nur noch einmal das Terminal und startet keinen
+zweiten Bot.
+
+**Noch bequemer:**
+
+- **Desktop-Verknüpfung mit Icon:** `python -m multbot shortcut` legt „MULTBOT“ auf den Desktop. Unter
+  Windows ist das eine `.lnk`, unter macOS eine `.command`-Datei und unter Linux ein `.desktop`-Eintrag im
+  Anwendungsmenü. Mit `shortcut --sim` entsteht eine Verknüpfung für die Simulation.
+- **Als App installieren:** Im laufenden Terminal erscheint in Chrome oder Edge oben rechts der Knopf
+  **⤓ APP** (alternativ über das Install-Symbol in der Adressleiste). Danach steht MULTBOT im
+  Startmenü bzw. Dock und öffnet sich wie ein eigenes Programm. Der Bot selbst muss dafür laufen.
+- **Auf dem Handy:** Starte mit `MULTBOT.bat run --lan` (oder `./start.sh run --lan`). Das Log zeigt dann
+  eine Adresse wie `http://192.168.x.x:8050`. Öffne sie auf dem Handy im selben WLAN und lege sie über
+  „Zum Startbildschirm hinzufügen“ ab. Achtung: Im WLAN kann dann jeder das Terminal öffnen und die
+  Steuerung (Pause, Flat, Reset) benutzen. Es ist nur Papiergeld, aber nutze das trotzdem nur im eigenen Netz.
+- **Simulation statt Live:** `MULTBOT.bat sim` bzw. `./start.sh sim`.
+
+## Schnellstart (Kommandozeile)
 
 ```bash
 pip install -r requirements.txt
 
 python -m multbot markets      # Live-Tabelle deiner Märkte (Hebel, Mark, Funding, Volumen, OI, Gebühr)
-python -m multbot run --open   # Live-Papierhandel + Terminal unter http://127.0.0.1:8050
+python -m multbot run --app    # Live-Papierhandel, Terminal als App-Fenster (http://127.0.0.1:8050)
+python -m multbot run --open   # dasselbe im normalen Browser-Tab
+python -m multbot shortcut     # Desktop-Verknüpfung anlegen
 python -m multbot research     # Walk-Forward-Backtest, Monte Carlo, Signal-Forschung
 python -m multbot sim --open   # Offline-Simulation (synthetischer Markt im Zeitraffer)
 python -m multbot report       # Kontoübersicht aus der Datenbank

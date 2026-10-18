@@ -68,7 +68,18 @@ def create_app(cfg: Config, runner: BaseRunner) -> Starlette:
         return runner.pretrain
 
     async def index(_: Request):
-        return FileResponse(STATIC / "index.html")
+        return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-cache"})
+
+    async def manifest(_: Request):
+        return FileResponse(STATIC / "manifest.webmanifest", media_type="application/manifest+json")
+
+    async def service_worker(_: Request):
+        # served from the root so its scope covers the whole terminal
+        return FileResponse(STATIC / "sw.js", media_type="text/javascript",
+                            headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
+
+    async def favicon(_: Request):
+        return FileResponse(STATIC / "favicon.ico", media_type="image/x-icon")
 
     async def state(_: Request):
         return JSON(snapshot())
@@ -207,6 +218,9 @@ def create_app(cfg: Config, runner: BaseRunner) -> Starlette:
 
     routes = [
         Route("/", index),
+        Route("/manifest.webmanifest", manifest),
+        Route("/sw.js", service_worker),
+        Route("/favicon.ico", favicon),
         Route("/api/state", state),
         Route("/api/brain", brain),
         Route("/api/asset/{coin:path}", asset),

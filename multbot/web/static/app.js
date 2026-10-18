@@ -833,6 +833,23 @@
     window.addEventListener("resize", () => { A.built = null; render(); });
   }
 
+  let installEvt = null;
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    installEvt = e;
+    $("#install").hidden = false;
+  });
+  $("#install").onclick = async () => {
+    if (!installEvt) return;
+    installEvt.prompt();
+    await installEvt.userChoice;
+    installEvt = null;
+    $("#install").hidden = true;
+  };
+  window.addEventListener("appinstalled", () => { $("#install").hidden = true; status("MULTBOT als App installiert"); });
+  if ("serviceWorker" in navigator && (location.protocol === "https:" || ["localhost", "127.0.0.1"].includes(location.hostname))) {
+    navigator.serviceWorker.register("/sw.js").catch(() => { /* app install optional */ });
+  }
   initInput();
   buildFkeys();
   setInterval(updateTop, 1000);

@@ -5,6 +5,7 @@
     python -m multbot research     # walk-forward backtest, Monte Carlo, signal research
     python -m multbot markets      # live market table for the configured assets
     python -m multbot report       # account summary from the database
+    python -m multbot shortcut     # desktop shortcut that opens the terminal as an app window
 """
 from __future__ import annotations
 
@@ -28,11 +29,12 @@ BANNER = r"""
 """
 
 
-async def _serve(cfg, runner, host: str, port: int, open_browser: bool) -> None:
+async def _serve(cfg, runner, host: str, port: int, open_mode: str | None) -> None:
     import warnings
 
     import uvicorn
 
+    from .launcher import lan_ip, open_app
     from .web.server import create_app
 
     warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"uvicorn\..*")
@@ -49,19 +51,47 @@ async def _serve(cfg, runner, host: str, port: int, open_browser: bool) -> None:
             loop.add_signal_handler(sig, _shutdown)
         except NotImplementedError:  # Windows
             signal.signal(sig, lambda *_: _shutdown())
-    url = f"http://{host}:{port}"
-    log.info("Terminal: %s", url)
-    if open_browser:
-        import webbrowser
+    local_url = f"http://{'127.0.0.1' if host in ('0.0.0.0', '::') else host}:{port}"
 
-        loop.call_later(1.5, webbrowser.open, url)
+    async def _announce():
+        while not server.started:
+            if server.should_exit:
+                return
+            await asyncio.sleep(0.1)
+        log.info("Terminal: %s", local_url)
+        if host in ("0.0.0.0", "::"):
+            ip = lan_ip()
+            if ip:
+                log.info("Handy/Tablet im selben WLAN: http://%s:%d", ip, port)
+        if open_mode == "app":
+            log.info("Geöffnet im %s", open_app(local_url))
+        elif open_mode == "browser":
+            import webbrowser
+
+            webbrowser.open(local_url)
+        log.info("Beenden: dieses Fenster schließen oder Strg+C")
+
+    announcer = asyncio.create_task(_announce())
     bot = asyncio.create_task(runner.run())
     await server.serve()
+    announcer.cancel()
     runner.stop()
     try:
         await asyncio.wait_for(bot, timeout=10)
     except (asyncio.TimeoutError, asyncio.CancelledError):
         pass
+
+
+def _already_running(port: int) -> bool:
+    """True if a MULTBOT terminal already answers on this port (second double-click just opens it)."""
+    import json
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/state", timeout=1.5) as r:
+            return "info" in json.loads(r.read().decode("utf-8"))
+    except (OSError, ValueError):
+        return False
 
 
 async def _headless(runner) -> None:
@@ -81,14 +111,37 @@ def cmd_run(args, sim: bool = False) -> None:
         cfg.data_dir = args.data_dir
     from .engine.runner import LiveRunner, SimRunner
 
+    host = args.host or ("0.0.0.0" if args.lan else cfg.web.host)
+    port = args.port or cfg.web.port
+    open_mode = "app" if args.app else "browser" if args.open else None
+    if not args.no_web and _already_running(port):
+        from .launcher import open_app
+
+        url = f"http://127.0.0.1:{port}"
+        print(f"MULTBOT läuft bereits auf {url} – öffne nur das Terminal.")
+        if open_mode == "app":
+            open_app(url)
+        elif open_mode == "browser":
+            import webbrowser
+
+            webbrowser.open(url)
+        return
     runner = SimRunner(cfg, speed=args.speed, seed=args.seed) if sim else LiveRunner(cfg)
     print(BANNER)
-    host = args.host or cfg.web.host
-    port = args.port or cfg.web.port
     if args.no_web:
         asyncio.run(_headless(runner))
     else:
-        asyncio.run(_serve(cfg, runner, host, port, args.open))
+        asyncio.run(_serve(cfg, runner, host, port, open_mode))
+
+
+def cmd_shortcut(args) -> None:
+    from .launcher import create_shortcut
+
+    extra = " sim" if args.sim else " run"
+    path = create_shortcut(args.dir, args.python, args=extra.strip() + " --app" + (" --lan" if args.lan else ""),
+                           name="MULTBOT Simulation" if args.sim else "MULTBOT")
+    print(f"Verknüpfung erstellt: {path}")
+    print("Doppelklick startet den Bot und öffnet das Terminal als eigenes App-Fenster.")
 
 
 def cmd_research(args) -> None:
@@ -167,6 +220,17 @@ def cmd_report(args) -> None:
         print("Noch keine abgeschlossenen Trades.")
 
 
+def _ensure_project_dir(args) -> None:
+    """Started from a shortcut or another folder: work inside the project so config.yaml and data/ are found."""
+    import os
+    from pathlib import Path
+
+    from .launcher import REPO_DIR
+
+    if not Path(args.config).exists() and (REPO_DIR / args.config).exists():
+        os.chdir(REPO_DIR)
+
+
 def main(argv=None) -> None:
     p = argparse.ArgumentParser(prog="multbot", description="MULTBOT – Perpetual Signal Bot (Paper-Trading)")
     p.add_argument("--config", default="config.yaml")
@@ -179,7 +243,9 @@ def main(argv=None) -> None:
         sp.add_argument("--host", default=None)
         sp.add_argument("--port", type=int, default=None)
         sp.add_argument("--no-web", action="store_true", help="ohne Dashboard laufen")
-        sp.add_argument("--open", action="store_true", help="Browser öffnen")
+        sp.add_argument("--open", action="store_true", help="Terminal im Standardbrowser öffnen")
+        sp.add_argument("--app", action="store_true", help="Terminal als eigenes App-Fenster öffnen")
+        sp.add_argument("--lan", action="store_true", help="im lokalen Netz erreichbar machen (Handy/Tablet)")
         sp.add_argument("--speed", type=float, default=120.0, help="Sim: Zeitraffer-Faktor")
         sp.add_argument("--seed", type=int, default=None, help="Sim: Zufalls-Seed")
 
@@ -188,11 +254,17 @@ def main(argv=None) -> None:
     sr.add_argument("--bars", type=int, default=None)
     sr.add_argument("--entry-mode", choices=["maker", "taker"], default=None)
     sub.add_parser("markets", help="Live-Markttabelle")
+    sc = sub.add_parser("shortcut", help="Desktop-Verknüpfung erstellen (startet als App-Fenster)")
+    sc.add_argument("--dir", default=None, help="Zielordner (Standard: Desktop)")
+    sc.add_argument("--python", default=None, help="Python-Interpreter (Standard: der aktuelle)")
+    sc.add_argument("--sim", action="store_true", help="Verknüpfung für die Simulation statt Live")
+    sc.add_argument("--lan", action="store_true", help="auch im WLAN erreichbar")
     rp = sub.add_parser("report", help="Kontoübersicht aus der Datenbank")
     rp.add_argument("--run", default="live")
 
     args = p.parse_args(argv)
     setup_logging(args.log)
+    _ensure_project_dir(args)
     if args.cmd == "run":
         cmd_run(args)
     elif args.cmd == "sim":
@@ -201,6 +273,8 @@ def main(argv=None) -> None:
         cmd_research(args)
     elif args.cmd == "markets":
         cmd_markets(args)
+    elif args.cmd == "shortcut":
+        cmd_shortcut(args)
     elif args.cmd == "report":
         cmd_report(args)
     else:
