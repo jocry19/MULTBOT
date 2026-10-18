@@ -1,0 +1,96 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  MULTBOT – Perpetual Signal Bot (Paper-Trading auf Hyperliquid-Daten)
+#  Alle Trades werden SIMULIERT. Es werden niemals echte Orders gesendet.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Deine Märkte + Hebel. "leverage: max" = immer den maximalen Hebel der Börse
+# nehmen (wird beim Start live aus der Hyperliquid-Meta geladen und gegen
+# deinen Wert geprüft). Eine Zahl erzwingt genau diesen Hebel (gedeckelt auf
+# das Börsen-Maximum).
+assets:
+  - { coin: "xyz:GEV",   leverage: 10 }
+  - { coin: "HMSTR",     leverage: 3 }
+  - { coin: "xyz:EBAY",  leverage: 10 }
+  - { coin: "xyz:SHEIN", leverage: 10 }
+  - { coin: "TNSR",      leverage: 3 }
+  - { coin: "xyz:LYTE",  leverage: 10 }
+  - { coin: "xyz:OURA",  leverage: 5 }
+  - { coin: "xyz:XBI",   leverage: 10 }
+  - { coin: "xyz:KSTR",  leverage: 10 }
+  - { coin: "xyz:BIRD",  leverage: 10 }
+
+account:
+  starting_balance: 100.0       # Startkapital in USD
+  restart_on_ruin: true         # bei Totalverlust neue "Epoche" mit 100 USD, Lernen läuft weiter
+  ruin_threshold: 5.0           # unter diesem Equity-Wert gilt das Konto als ruiniert
+
+risk:
+  max_open_positions: 4
+  base_margin_pct: 0.18         # Basis-Margin pro Trade (Anteil am Equity), wird nach Überzeugung skaliert
+  min_margin_pct: 0.06
+  max_margin_pct: 0.35
+  max_total_margin_pct: 0.90    # max. gebundene Margin über alle Positionen
+  min_notional: 10.0            # Hyperliquid-Mindestordergröße
+  max_spread_bps: 80            # kein Einstieg bei zu breitem Spread
+  max_book_participation: 0.35  # max. Anteil an der sichtbaren Buchtiefe (±2 %)
+  stop_atr: 2.2                 # Stop-Abstand in ATR
+  tp_r: 2.2                     # Take-Profit in Vielfachen des Risikos (R)
+  trail_after_r: 1.0            # Trailing ab +1R
+  trail_atr: 1.6
+  max_hold_bars: 72             # Zeit-Stop
+  stop_liq_frac: 0.60           # Stop liegt spätestens bei 60 % der Distanz zum Liquidationspreis
+  daily_loss_pause_pct: 0.45    # Einstiegs-Pause, wenn Equity in 24 h um 45 % fällt
+  corr_limit: 0.85              # keine zwei hochkorrelierten Positionen in dieselbe Richtung
+  skip_stale_markets: true      # kein Einstieg, wenn der Markt "schläft" (Oracle eingefroren, keine Trades)
+  funding_guard_bps: 6.0        # kein Einstieg kurz vor Funding, wenn Funding stark gegen uns läuft
+
+signal:
+  interval: "5m"                # Entscheidungs-Takt
+  entry_threshold: 0.28         # |Ensemble-Score| für Einstieg
+  exit_threshold: 0.22          # Gegensignal-Stärke für Ausstieg
+  min_agreement: 0.55           # gewichteter Anteil der Strategien in Signalrichtung
+  min_pwin: 0.53                # Meta-Modell: min. Gewinnwahrscheinlichkeit (sobald trainiert)
+  ml_blend: 0.30                # Anteil des ML-Modells am finalen Score
+  horizon: 3                    # Lern-Horizont in Bars (3 × 5m = 15 min)
+  decay_horizons: [1, 2, 3, 6, 12, 24, 48]
+  warmup_bars: 150
+
+learning:
+  hedge_eta: 0.06               # Lernrate der Multiplicative-Weights
+  hedge_floor: 0.015            # Mindestgewicht, damit Strategien sich erholen können
+  hedge_decay: 0.999            # Vergessen: alte Evidenz verblasst (Gedächtnis ≈ 1000 Auswertungen)
+  lr: 0.03                      # Lernrate Online-Logit (AdaGrad)
+  l2: 0.0005
+  meta_min_samples: 200
+  pretrain_on_history: true     # beim Start auf Historie vortrainieren (nur neue Bars)
+  history_bars: 4000            # wie viele Bars Historie geladen werden
+  persist_every_s: 60
+
+fees:
+  base_taker: 0.00045           # Hyperliquid Tier 0
+  base_maker: 0.00015
+  use_exchange_scaling: true    # HIP-3 Deployer-Fee-Scale + Growth-Mode aus der Meta übernehmen
+
+execution:
+  book_levels: 20
+  latency_ms: 300
+  extra_slippage_bps: 1.0
+  synthetic_spread_bps: 12      # nur Backtest/Sim, wenn kein echtes Orderbuch vorliegt
+  entry_mode: "maker"           # "maker": Limit am Best-Bid/-Ask (gefüllt nur wenn der Markt durchhandelt)
+                                # "taker": sofortiger Market-Einstieg durchs Orderbuch
+  maker_timeout_bars: 2         # unausgeführte Limit-Order nach n Bars stornieren
+  tp_maker: true                # Take-Profit als ruhende Limit-Order
+
+research:
+  train_frac: 0.40              # Walk-Forward: erste 40 % nur lernen, Rest out-of-sample handeln
+  mc_paths: 3000
+  mc_trades: 200
+
+web:
+  host: "127.0.0.1"
+  port: 8050
+  push_interval_s: 1.0
+
+data_dir: "data"
+api_url: "https://api.hyperliquid.xyz"
+ws_url: "wss://api.hyperliquid.xyz/ws"

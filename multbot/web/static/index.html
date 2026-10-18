@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MULTBOT Terminal</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header id="topbar">
+  <div class="brand"><span class="logo">MULTBOT</span><span class="sub">PERP SIGNAL TERMINAL</span></div>
+  <div id="mode" class="badge">…</div>
+  <div class="kv"><span class="k">UTC</span><span id="clk-utc" class="v">--:--:--</span></div>
+  <div class="kv"><span class="k">NY</span><span id="clk-et" class="v">--:--</span></div>
+  <div class="kv big"><span class="k">EQUITY</span><span id="top-eq" class="v">-</span></div>
+  <div class="kv"><span class="k">PNL</span><span id="top-pnl" class="v">-</span></div>
+  <div class="kv"><span class="k">EPOCHE</span><span id="top-epoch" class="v">-</span></div>
+  <div class="kv"><span class="k">POS</span><span id="top-pos" class="v">-</span></div>
+  <div class="kv"><span class="k">LERNEN</span><span id="top-learn" class="v">-</span></div>
+  <div class="cmd">
+    <span class="prompt">&gt;</span>
+    <input id="cmd" autocomplete="off" spellcheck="false" placeholder="GEV &lt;GO&gt; · HELP">
+    <button id="go" class="gobtn">GO</button>
+  </div>
+  <div id="conn" class="conn" title="Verbindung">●</div>
+</header>
+<nav id="fkeys"></nav>
+<main id="page"></main>
+<footer id="status">
+  <div id="tape" class="tape"><div id="tape-inner"></div></div>
+  <div id="statusline">Verbinde …</div>
+</footer>
+<div id="tooltip"></div>
+<script src="/static/charts.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
