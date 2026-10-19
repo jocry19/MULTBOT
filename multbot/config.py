@@ -82,7 +82,7 @@ class SignalCfg:
     rank_entries: bool = True            # rank each bar's candidates across markets by expected ROE
     min_exp_roe: float | None = 0.0      # min. expected net return on the margin (0.02 = +2 %; None = off)
     max_new_per_bar: int | None = None   # cap on new entries per bar (best-ranked first; None = no cap)
-    move_shrink: float = 300.0           # pseudo-observations pulling a market's slope to the pooled one
+    move_shrink: float = 2000.0          # pseudo-observations pulling an expected-move cell to the pooled mean
     use_lead_lag: bool = False           # lead-lag features vs BTC / XYZ100 (walk-forward: hurt on 5m and 15m)
     disabled_strategies: list = field(default_factory=lambda: ["leadlag"])
 

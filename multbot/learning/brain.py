@@ -7,7 +7,7 @@ Every bar, every strategy's opinion on every asset is recorded as a *pending eva
 * Beta posteriors of each strategy's hit rate – strategies that are reliably wrong get muted
 * an online logistic model that predicts the direction of the next move from ~40 features
 * a meta-label model that predicts whether a trade candidate beats its costs
-* the expected move per unit of signal (pooled over all markets, shrunk per market) – used to rank entries
+* the expected favourable move of a candidate by signal strength × volatility (all markets) – ranks entries
 * information coefficients (IC) per strategy × horizon / regime / asset and per feature
 * calibration tables and a learning curve
 """
@@ -27,7 +27,7 @@ from ..features.regime import REGIMES
 from ..strategies.library import ALL_KEYS, ML_KEY, STRATEGY_KEYS
 from .hedge import Hedge, blend_logw, softmax_floor
 from .online_lr import OnlineLogit
-from .stats import BetaArm, Calibration, EWCorr
+from .stats import BetaArm, Calibration, EWCorr, EWMean
 
 log = logging.getLogger("multbot.brain")
 
@@ -36,6 +36,8 @@ META_FEATURES = ["abs_final", "agreement", "p_dir", "vol_pct", "spread", "stale"
 
 ENS = "ensemble"
 FINAL = "final"
+MOVE_F_EDGES = (0.2, 0.28, 0.35, 0.42, 0.5, 0.6)   # |final score| buckets of the expected-move table
+MOVE_S_EDGES = (0.003, 0.0065, 0.011)              # horizon volatility σ·√H buckets (fraction of price)
 
 
 class Brain:
@@ -60,7 +62,10 @@ class Brain:
         self.ic_regime = {k: {r: EWCorr() for r in REGIMES} for k in track}
         self.ic_asset = {k: {c: EWCorr() for c in self.coins} for k in track}
         self.feat_ic = {f: EWCorr() for f in ML_FEATURES}
-        self.move = EWCorr(halflife=20000)   # final score → vol-normalised forward return, all markets
+        # realised move in signal direction over H for every candidate, pooled and per |score| × σ bucket
+        self.move = EWMean(halflife=20000)
+        self.move_cells = [[EWMean(halflife=20000) for _ in range(len(MOVE_S_EDGES) + 1)]
+                           for _ in range(len(MOVE_F_EDGES) + 1)]
         self.shadow = {k: 0.0 for k in track}
         self.counts = {k: [0, 0] for k in track}  # [n, hits]
         self.cal_ml = Calibration()
@@ -186,6 +191,10 @@ class Brain:
             pm = self.meta.predict(it["meta_x"])
             self.cal_meta.add(pm, win)
             self.meta.update(it["meta_x"], win)
+        if h == self.H and it["side"]:
+            fav = it["side"] * ret            # flat bars count too: a trade there only pays its costs
+            self.move.add(fav)
+            self._move_cell(it["final"], it["vol"]).add(fav)
         if h != self.H or flat:
             return
         # primary horizon: the main learning step
@@ -213,8 +222,6 @@ class Brain:
                 self.ic_regime[k][regime].add(s, norm)
             if coin in self.ic_asset[k]:
                 self.ic_asset[k][coin].add(s, norm)
-        if abs(it["final"]) > 0.05:
-            self.move.add(it["final"], norm)
         for name, val in zip(ML_FEATURES, it["x"].tolist()):
             if val != 0.0:
                 self.feat_ic[name].add(val, norm)
@@ -233,25 +240,24 @@ class Brain:
             elif k in self.muted and (arm.mean >= 0.49 or arm.prob_above(0.5) > 0.2):
                 self.muted.discard(k)
 
-    def move_slope(self, coin: str | None = None) -> float | None:
-        """Learned E[vol-normalised return over H | final score] per unit of score (regression through 0).
-        A market's own slope is shrunk towards the pooled one with ``move_shrink`` pseudo-observations."""
-        g = self.move
-        if g.n < 300 or g.mss <= 1e-12:
-            return None
-        b = g.msr / g.mss
-        a = self.ic_asset[FINAL].get(coin) if coin else None
-        if a is not None and a.n >= 30 and a.mss > 1e-12:
-            w, k = min(a.n, a.w), self.cfg.signal.move_shrink
-            b = (w * a.msr / a.mss + k * b) / (w + k)
-        return b
+    def _move_cell(self, final: float, vol: float) -> EWMean:
+        sig_h = max(vol, 0.0) * math.sqrt(self.H)
+        fi = sum(abs(final) >= e for e in MOVE_F_EDGES)
+        si = sum(sig_h >= e for e in MOVE_S_EDGES)
+        return self.move_cells[fi][si]
 
-    def expected_move(self, coin: str, final: float, vol: float) -> float | None:
-        """Expected log return over the learning horizon for this signal (signed, fraction of price)."""
-        b = self.move_slope(coin)
-        if b is None:
+    def expected_move(self, final: float, vol: float) -> float | None:
+        """Expected move in the signal's direction over the learning horizon (fraction of price), learned from
+        what candidates with this signal strength and volatility actually did. A non-parametric table on
+        purpose: in walk-forward tests the edge did not grow with the score – the strongest signals and the
+        most volatile markets did worst – so a linear "score × volatility" model ranks them the wrong way.
+        Each cell is shrunk towards the pooled mean with ``move_shrink`` pseudo-observations."""
+        g = self.move
+        if g.n < 500:
             return None
-        return b * final * max(vol, 1e-6) * math.sqrt(self.H)
+        c = self._move_cell(final, vol)
+        k = self.cfg.signal.move_shrink
+        return (c.w * c.m + k * g.m) / (c.w + k)
 
     def learn_trade(self, meta_x, win: bool) -> None:
         """Real closed trades teach the meta model with extra weight."""
@@ -301,7 +307,7 @@ class Brain:
                      "ready": self.meta_ready},
             "hit_recent": float(np.mean(self.recent_final)) if self.recent_final else None,
             "ic_final": self.ic[FINAL][self.H].corr, "muted": sorted(self.muted),
-            "move_slope": self.move_slope(), "move_n": self.move.n,
+            "move_mean": self.move.m if self.move.n else None, "move_n": self.move.n,
             "weights": self.hedge_global.weights(),
         }
         if light:
@@ -319,6 +325,8 @@ class Brain:
             "meta_importance": self.meta.importance(),
             "cal_ml": self.cal_ml.table(), "cal_meta": self.cal_meta.table(),
             "curve": self.curve[-1500:],
+            "move_table": {"f_edges": MOVE_F_EDGES, "s_edges": MOVE_S_EDGES,
+                           "cells": [[{"m": c.m, "n": c.n} for c in row] for row in self.move_cells]},
         })
         return snap
 
@@ -335,7 +343,7 @@ class Brain:
             "ic_regime": {k: {r: v.to_list() for r, v in d.items()} for k, d in self.ic_regime.items()},
             "ic_asset": {k: {c: v.to_list() for c, v in d.items()} for k, d in self.ic_asset.items()},
             "feat_ic": {f: v.to_list() for f, v in self.feat_ic.items()},
-            "move": self.move.to_list(),
+            "move": self.move.to_list(), "move_cells": [[c.to_list() for c in row] for row in self.move_cells],
             "shadow": self.shadow, "counts": self.counts,
             "cal_ml": self.cal_ml.to_dict(), "cal_meta": self.cal_meta.to_dict(),
             "curve": self.curve, "recent_final": list(self.recent_final),
@@ -372,8 +380,13 @@ class Brain:
         for f, x in d.get("feat_ic", {}).items():
             if f in self.feat_ic:
                 self.feat_ic[f].load(x)
-        if d.get("move"):
+        if d.get("move") and len(d["move"]) == 3:
             self.move.load(d["move"])
+            cells = d.get("move_cells") or []
+            if len(cells) == len(self.move_cells) and all(len(r) == len(MOVE_S_EDGES) + 1 for r in cells):
+                for row, xs in zip(self.move_cells, cells):
+                    for c, x in zip(row, xs):
+                        c.load(x)
         for k, v in d.get("shadow", {}).items():
             if k in self.shadow:
                 self.shadow[k] = float(v)

@@ -1,3 +1,4 @@
+import json
 import math
 
 import numpy as np
@@ -417,21 +418,24 @@ def test_history_cache_refetches_missing_older_range(cfg, tmp_path):
     assert len(h.bars) >= 990
 
 
-def test_expected_move_learns_slope_and_shrinks_per_market(cfg):
-    brain = Brain(cfg, ["A", "B"])
-    assert brain.expected_move("A", 0.5, 0.002) is None                 # nothing learned yet
+def test_expected_move_table_learns_per_bucket(cfg):
+    """The expected favourable move is learned per |score| × volatility bucket, shrunk to the pooled mean."""
+    brain = Brain(cfg, ["A"])
+    assert brain.expected_move(0.3, 0.001) is None                      # nothing learned yet
     rng = np.random.default_rng(0)
-    for _ in range(3000):                                               # pooled: E[norm | s] = 0.4 · s
-        sc = rng.uniform(-1, 1)
-        brain.move.add(sc, 0.4 * sc + rng.normal(0, 1))
-    for _ in range(400):                                                # market B: its own signal is useless
-        sc = rng.uniform(-1, 1)
-        brain.ic_asset["final"]["B"].add(sc, -0.4 * sc + rng.normal(0, 0.2))
-    em = brain.expected_move("A", 0.5, 0.002)
-    assert em == pytest.approx(0.4 * 0.5 * 0.002 * math.sqrt(brain.H), rel=0.25)
-    assert brain.expected_move("A", -0.5, 0.002) == pytest.approx(-em)
-    sb = brain.move_slope("B")
-    assert -0.4 < sb < 0.4 * 0.5                                        # pulled towards B's own (negative) slope
+    for _ in range(6000):
+        sc, vol = rng.choice([0.3, 0.7]), 0.001
+        fav = (0.0006 if sc < 0.5 else -0.0004) + rng.normal(0, 0.002)   # strong signals revert
+        brain.move.add(fav)
+        brain._move_cell(sc, vol).add(fav)
+    mid, strong = brain.expected_move(0.3, 0.001), brain.expected_move(-0.7, 0.001)
+    assert mid > 0.0003 and strong < 0 and mid > strong
+    assert brain.expected_move(0.3, 0.02) == pytest.approx(brain.move.m)   # empty bucket → pooled mean
+    d = brain.to_dict()
+    b2 = Brain(cfg, ["A"])
+    from multbot.learning.brain import _json_default
+    b2.load(json.loads(json.dumps(d, default=_json_default)))
+    assert b2.expected_move(0.3, 0.001) == pytest.approx(mid)
 
 
 def test_entries_ranked_by_expected_roe(cfg):

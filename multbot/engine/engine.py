@@ -115,10 +115,9 @@ class Engine:
         pwin = self.brain.p_win(meta_x) if meta_x is not None else None
         exp_move = exp_roe = None
         if cand:
-            em = self.brain.expected_move(coin, final, frow.get("vol", 0.0))
-            if em is not None:
-                exp_move = cand * em                                     # favourable move, fraction of price
-                exp_roe = self.specs[coin].leverage * (exp_move - cost)  # net return on the 100 USD margin
+            exp_move = self.brain.expected_move(final, frow.get("vol", 0.0))   # in signal direction
+            if exp_move is not None:
+                exp_roe = self.specs[coin].leverage * (exp_move - cost)   # net return on the 100 USD margin
         if learn:
             self.brain.observe(coin, t, frow["close"], frow.get("vol", 1e-4), regime.label, d, frow, meta_x, cand,
                                cost)

@@ -365,8 +365,8 @@ signal:
   min_exp_roe: 0.0              # nur Trades mit erwarteter Rendite ≥ Wert auf die Margin nach Kosten
                                 # (0.02 = +2 % = +2 USD je 100 USD; null = aus)
   max_new_per_bar: null         # höchstens so viele neue Positionen je Bar (die besten; null = kein Limit)
-  move_shrink: 300              # wie stark die erwartete Bewegung eines Markts zum Durchschnitt aller
-                                # Märkte gezogen wird (Pseudo-Beobachtungen)
+  move_shrink: 2000             # wie stark eine Zelle der gelernten Bewegungs-Tabelle (Signalstärke ×
+                                # Volatilität) zum Gesamtdurchschnitt gezogen wird (Pseudo-Beobachtungen)
   use_lead_lag: false           # Lead-Lag-Features ggü. BTC / XYZ100. Walk-Forward: auf 5m und 15m schlechter
   disabled_strategies: [leadlag] # Strategien, die nie ins Ensemble gehen (Schlüssel wie im Terminal)
 

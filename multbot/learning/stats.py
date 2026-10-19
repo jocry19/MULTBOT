@@ -50,6 +50,28 @@ class EWCorr:
         self.n = int(x[6])
 
 
+class EWMean:
+    """Exponentially weighted mean with its effective sample weight."""
+
+    __slots__ = ("lam", "w", "m", "n")
+
+    def __init__(self, halflife: float = 20000.0):
+        self.lam = 0.5 ** (1.0 / halflife)
+        self.w = self.m = 0.0
+        self.n = 0
+
+    def add(self, x: float) -> None:
+        self.w = self.lam * self.w + 1.0
+        self.m += (x - self.m) / self.w
+        self.n += 1
+
+    def to_list(self) -> list:
+        return [self.w, self.m, self.n]
+
+    def load(self, x: list) -> None:
+        self.w, self.m, self.n = float(x[0]), float(x[1]), int(x[2])
+
+
 class BetaArm:
     """Decayed Beta posterior of a strategy's directional hit rate (Thompson-style)."""
 
