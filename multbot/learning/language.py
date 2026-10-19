@@ -132,7 +132,8 @@ class MarketLanguage:
         self.mood_hist: deque = deque(maxlen=288)
         self.acc_n = 0                               # online accuracy of the language's own predictions
         self.acc_hits = 0
-        self.ic = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]     # EW sums for corr(prediction, outcome)
+        self.ic = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]     # EW sums for corr(prediction, outcome): recent …
+        self.ic_long = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # … and long memory
         self.curve: list[dict] = []
         self.n_learned = 0
 
@@ -227,26 +228,26 @@ class MarketLanguage:
         return learned
 
     def _score(self, mu: float, z: float, y: float, t: int) -> None:
-        lam = 0.9995
-        s = self.ic
-        s[0] = lam * s[0] + 1.0
-        a = 1.0 / s[0]
-        s[1] += a * (mu - s[1])
-        s[2] += a * (y - s[2])
-        s[3] += a * (mu * mu - s[3])
-        s[4] += a * (y * y - s[4])
-        s[5] += a * (mu * y - s[5])
+        for s, lam in ((self.ic, 0.9995), (self.ic_long, 0.99998)):
+            s[0] = lam * s[0] + 1.0
+            a = 1.0 / s[0]
+            s[1] += a * (mu - s[1])
+            s[2] += a * (y - s[2])
+            s[3] += a * (mu * mu - s[3])
+            s[4] += a * (y * y - s[4])
+            s[5] += a * (mu * y - s[5])
         if abs(z) >= 1.0 and y != 0:
             self.acc_n += 1
             self.acc_hits += (mu > 0) == (y > 0)
         if self.n_learned % 500 == 0:
-            self.curve.append({"t": t, "n": self.n_learned, "ic": self.ic_value(), "hit": self.hit_rate(),
+            self.curve.append({"t": t, "n": self.n_learned, "ic": self.ic_value(), "ic_long": self.ic_value(True),
+                               "hit": self.hit_rate(),
                                "phrases": len(self.stats)})
             if len(self.curve) > 2000:
                 self.curve = self.curve[::2]
 
-    def ic_value(self) -> float:
-        _, mx, my, mxx, myy, mxy = self.ic
+    def ic_value(self, long: bool = False) -> float:
+        _, mx, my, mxx, myy, mxy = self.ic_long if long else self.ic
         vx, vy = mxx - mx * mx, myy - my * my
         return float((mxy - mx * my) / math.sqrt(vx * vy)) if vx > 1e-12 and vy > 1e-12 else 0.0
 
@@ -297,6 +298,7 @@ class MarketLanguage:
                 sentences[coin] = [word_symbol(w) for w in ws] + [f"| Stunde {COURSE_SYM[self.course.get(coin, 2)]}"]
         return {
             "horizon": self.H, "phrases_known": len(self.stats), "learned": self.n_learned, "ic": self.ic_value(),
+            "ic_long": self.ic_value(True),
             "hit": self.hit_rate(), "hit_n": self.acc_n, "mood": self.mood, "mood_text": mood_text(self.mood),
             "mood_hist": list(self.mood_hist)[-96:], "vocab": vocab, "moods": moods,
             "top_phrases": [{"text": self.phrase_text(c), "order": c[0], "mean": round(s.m, 4), "t": round(t, 2),
@@ -312,7 +314,7 @@ class MarketLanguage:
                 "stats": [[list(c), s.to_list()] for c, s in self.stats.items() if s.w > 0.5],
                 "words": {c: list(w) for c, w in self.words.items()}, "mood": self.mood, "course": self.course,
                 "said": self.said,
-                "acc": [self.acc_n, self.acc_hits], "ic": self.ic, "curve": self.curve[-500:],
+                "acc": [self.acc_n, self.acc_hits], "ic": self.ic, "ic_long": self.ic_long, "curve": self.curve[-500:],
                 "n_learned": self.n_learned}
 
     def load(self, d: dict) -> None:
@@ -327,5 +329,7 @@ class MarketLanguage:
         self.acc_n, self.acc_hits = (int(x) for x in d.get("acc", [0, 0]))
         if len(d.get("ic", [])) == 6:
             self.ic = [float(x) for x in d["ic"]]
+        if len(d.get("ic_long", [])) == 6:
+            self.ic_long = [float(x) for x in d["ic_long"]]
         self.curve = list(d.get("curve", []))
         self.n_learned = int(d.get("n_learned", 0))

@@ -864,18 +864,18 @@
       const leg = (o) => Object.entries(o).map(([k, v]) => `<b class="amber">${esc(k)}</b> ${esc(v)}`).join(" · ");
       set("lghead", `<div class="metrics">${metric("Modus", L.mode === "language" ? "SPRICHT" : "hört nur zu", L.mode === "language" ? "up" : "", L.mode === "language" ? "entscheidet die Trades" : "Ensemble entscheidet (signal.mode)")}` +
         metric("Gelernte Phrasen", (L.phrases_known || 0).toLocaleString()) + metric("Gelernte Sätze", (L.learned || 0).toLocaleString()) +
-        metric("Treffsicherheit (IC)", f(L.ic, 3), cls(L.ic), "Vorhersage vs. Ergebnis") + metric("Richtung richtig", pct(L.hit, 1), cls((L.hit || 0.5) - 0.5), `bei sicheren Aussagen (n=${(L.hit_n || 0).toLocaleString()})`) +
+        metric("Treffsicherheit (IC)", f(L.ic, 3), cls(L.ic), "zuletzt · gesamt " + f(L.ic_long, 3)) + metric("Richtung richtig", pct(L.hit, 1), cls((L.hit || 0.5) - 0.5), `bei sicheren Aussagen (n=${(L.hit_n || 0).toLocaleString()})`) +
         metric("Stimmung jetzt", esc(L.mood_text || "-"), "", "letzte abgeschlossene Bar") + metric("Horizont", L.horizon + " Bars") + `</div>` +
         `<p class="note">Jede Kerze wird zu einem <b>Wort</b> aus drei Buchstaben, gemessen am eigenen Verhalten des Markts: Bewegung ${leg(lg.move)} · Volumen ${leg(lg.volume)} · Spanne ${leg(lg.range)}. ` +
         `Dazu kommt die <b>Stimmung</b> aller Märkte. Die <b>Grammatik</b> lernt live, was auf welche Wortfolgen folgt (1, 2 oder 3 Wörter, plus „Dialekt“ je Markt) – mit Vergessen, damit sie sich an die aktuelle Sprache des Markts anpasst. Keine festen Strategien: Gehandelt wird nur, wenn eine Phrase genug Belege hat und die erwartete Bewegung die Kosten übersteigt.</p>`);
       const now = Object.entries(L.now || {}).sort((a, b) => Math.abs(b[1].z) - Math.abs(a[1].z));
-      set("lgnow", `<table class="t"><thead><tr><th class="l">Markt</th><th>Satz (alt → neu)</th><th>Erwartung</th><th>Sicherheit z</th><th>Belege</th><th class="l">Status</th></tr></thead><tbody>` +
+      set("lgnow", `<table class="t"><thead><tr><th class="l">Markt</th><th>Satz (alt → neu)</th><th>Erwartung</th><th title="Belege-gewichtete Sicherheit – kein klassischer t-Wert, da sich die Ergebnisse aufeinanderfolgender Kerzen überlappen">Sicherheit</th><th>Belege</th><th class="l">Status</th></tr></thead><tbody>` +
         now.map(([c, x]) => `<tr class="click" data-c="${esc(c)}"><td class="l amber">${esc(c.replace("xyz:", ""))}</td><td style="font-size:15px;letter-spacing:2px">${(x.sentence || []).map(esc).join(" ")}</td>` +
           `<td class="${cls(x.mu)}">${sgn(x.mu, 3)} σ</td><td style="${heat(x.z, 3)}">${sgn(x.z, 2)}</td><td>${x.evidence.toLocaleString()}</td><td class="l dim">${esc((x.status || "").slice(0, 30))}</td></tr>`).join("") + `</tbody></table>`);
       document.querySelectorAll("#pb-lgnow tr[data-c]").forEach((tr) => (tr.onclick = () => { A.coin = tr.dataset.c; go("ASSET"); }));
       set("lgphr", `<table class="t"><thead><tr><th class="l">Phrase</th><th>danach Ø</th><th>t</th><th>Belege</th></tr></thead><tbody>` +
         (L.top_phrases || []).map((p) => `<tr><td class="l" style="letter-spacing:1px">${esc(p.text)}</td><td class="${cls(p.mean)}">${sgn(p.mean, 3)} σ</td><td style="${heat(p.t, 4)}">${sgn(p.t, 1)}</td><td>${Math.round(p.weight).toLocaleString()}</td></tr>`).join("") +
-        `</tbody></table><p class="note" style="padding:4px 8px">„danach Ø“ = mittlere Bewegung über ${L.horizon} Bars in Volatilitäts-Einheiten. Mit hunderten getesteten Phrasen sind einige |t| &gt; 2 auch reiner Zufall – darum lässt der Bot sie nur mit Belegen und nach Kosten sprechen.</p>`);
+        `</tbody></table><p class="note" style="padding:4px 8px">„danach Ø“ = mittlere Bewegung über ${L.horizon} Bars in Volatilitäts-Einheiten. t = Belege-gewichtete Sicherheit. Sie wirkt größer als sie ist: Die Ergebnisse aufeinanderfolgender Kerzen überlappen sich, und viele Märkte bewegen sich gleichzeitig. Bei zehntausenden Phrasen sind große Werte auch reiner Zufall – darum lässt der Bot nur Phrasen mit vielen Belegen und erst nach Kosten „sprechen“ (Schwelle im Walk-Forward gewählt).</p>`);
       const voc = L.vocab || [];
       set("lgvoc", `<div style="display:grid;grid-template-columns:repeat(9,1fr);gap:3px;padding:6px">` +
         voc.map((v) => `<div title="${esc(v.text)} · Belege ${Math.round(v.weight)}" style="padding:5px 2px;text-align:center;${v.mean === null ? "background:#0b1120;color:#566079" : heat(v.mean * 6, 1)}"><div style="font-size:15px">${esc(v.sym)}</div><div style="font-size:10px">${v.mean === null ? "-" : sgn(v.mean, 2)}</div></div>`).join("") + `</div>`);
@@ -883,8 +883,9 @@
         (L.moods || []).map((m) => `<tr${m.mood === L.mood ? ' style="outline:1px solid var(--amber)"' : ""}><td class="l">${esc(m.text)}${m.mood === L.mood ? ' <span class="tag">JETZT</span>' : ""}</td><td class="${cls(m.mean)}">${m.mean === null ? "-" : sgn(m.mean, 3) + " σ"}</td><td>${Math.round(m.weight).toLocaleString()}</td></tr>`).join("") + `</tbody></table>`);
       const cur = L.curve || [];
       CH.line(cv("lgcurve"), { xType: "num", zero: true, xFmt: (v) => Math.round(v).toLocaleString(), yFmt: (v) => v.toFixed(3), empty: "Lernkurve erscheint nach den ersten 500 gelernten Sätzen",
-        series: [{ data: cur.map((p) => [p.n, p.ic]), color: CH.C.cyan, label: "IC" }, { data: cur.filter((p) => p.hit !== null).map((p) => [p.n, p.hit - 0.5]), color: CH.C.amber, label: "Treffer − 50 %" }] });
-      setR("lgcurve", '<span class="cyan">■ IC</span> <span class="amber">■ Treffer−50%</span>');
+        series: [{ data: cur.map((p) => [p.n, p.ic]), color: CH.C.cyan, label: "IC zuletzt" },
+          { data: cur.filter((p) => isNum(p.ic_long)).map((p) => [p.n, p.ic_long]), color: CH.C.violet, label: "IC gesamt" }, { data: cur.filter((p) => p.hit !== null).map((p) => [p.n, p.hit - 0.5]), color: CH.C.amber, label: "Treffer − 50 %" }] });
+      setR("lgcurve", '<span class="cyan">■ IC zuletzt</span> <span class="violet">■ IC gesamt</span> <span class="amber">■ Treffer−50%</span>');
     },
   };
 
