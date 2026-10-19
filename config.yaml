@@ -315,9 +315,12 @@ account:
   starting_balance: 100.0       # nur für mode: compounding
   restart_on_ruin: true         # nur compounding: bei Totalverlust neue "Epoche"
   ruin_threshold: 5.0
+  reference_capital_usd: null   # nur fixed: Bezugsgröße für %-Kennzahlen (Sharpe, DD %), ändert keinen Trade.
+                                # null = 10 × position_margin_usd (bzw. × max_open_positions)
 
 risk:
-  max_open_positions: 5         # maximal gleichzeitig offene Positionen
+  max_open_positions: null      # null = unbegrenzt. Statt eines Limits werden die Kandidaten jeder Bar nach
+                                # erwarteter Rendite gerankt (signal.rank_entries / min_exp_roe)
   base_margin_pct: 0.12         # Basis-Margin pro Trade (Anteil am Equity), wird nach Überzeugung skaliert
   min_margin_pct: 0.04
   max_margin_pct: 0.25
@@ -357,6 +360,13 @@ signal:
   regime_gate_ic: null          # dasselbe je Marktphase (Trend/Range × Vola)
   gate_min_obs: 150
   funding_hold_hours: 2.0       # erwartete Haltedauer für die Funding-Kosten im Meta-Modell
+  rank_entries: true            # alle Kandidaten einer Bar über alle Märkte ranken: höchste erwartete
+                                # Rendite auf die Margin zuerst (erwartete Bewegung × Hebel − Kosten × Hebel)
+  min_exp_roe: 0.0              # nur Trades mit erwarteter Rendite ≥ Wert auf die Margin nach Kosten
+                                # (0.02 = +2 % = +2 USD je 100 USD; null = aus)
+  max_new_per_bar: null         # höchstens so viele neue Positionen je Bar (die besten; null = kein Limit)
+  move_shrink: 300              # wie stark die erwartete Bewegung eines Markts zum Durchschnitt aller
+                                # Märkte gezogen wird (Pseudo-Beobachtungen)
   use_lead_lag: false           # Lead-Lag-Features ggü. BTC / XYZ100. Walk-Forward: auf 5m und 15m schlechter
   disabled_strategies: [leadlag] # Strategien, die nie ins Ensemble gehen (Schlüssel wie im Terminal)
 

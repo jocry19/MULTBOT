@@ -30,6 +30,7 @@ class AccountCfg:
     starting_balance: float = 100.0
     restart_on_ruin: bool = True
     ruin_threshold: float = 5.0
+    reference_capital_usd: float | None = None   # base for % figures in mode fixed (None = auto)
 
     @property
     def fixed(self) -> bool:
@@ -38,7 +39,7 @@ class AccountCfg:
 
 @dataclass
 class RiskCfg:
-    max_open_positions: int = 5
+    max_open_positions: int | None = None   # None/0 = unlimited (fixed mode: entries are ranked instead)
     base_margin_pct: float = 0.12
     min_margin_pct: float = 0.04
     max_margin_pct: float = 0.25
@@ -78,6 +79,10 @@ class SignalCfg:
     regime_gate_ic: float | None = None  # same per market regime
     gate_min_obs: int = 150              # observations before a gate may block
     funding_hold_hours: float = 2.0      # expected holding time for the funding cost estimate
+    rank_entries: bool = True            # rank each bar's candidates across markets by expected ROE
+    min_exp_roe: float | None = 0.0      # min. expected net return on the margin (0.02 = +2 %; None = off)
+    max_new_per_bar: int | None = None   # cap on new entries per bar (best-ranked first; None = no cap)
+    move_shrink: float = 300.0           # pseudo-observations pulling a market's slope to the pooled one
     use_lead_lag: bool = False           # lead-lag features vs BTC / XYZ100 (walk-forward: hurt on 5m and 15m)
     disabled_strategies: list = field(default_factory=lambda: ["leadlag"])
 
@@ -157,7 +162,9 @@ class Config:
     def reference_capital(self) -> float:
         """Capital base for percentages: n × position margin (fixed) or the starting balance."""
         if self.account.fixed:
-            return self.account.position_margin_usd * max(1, self.risk.max_open_positions)
+            if self.account.reference_capital_usd:
+                return float(self.account.reference_capital_usd)
+            return self.account.position_margin_usd * (self.risk.max_open_positions or 10)
         return self.account.starting_balance
 
     @property

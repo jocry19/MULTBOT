@@ -302,6 +302,8 @@ class BaseRunner:
                                         "v": 0.0, "n": 0}
                 if closed % 12 == 0:
                     await asyncio.sleep(0)
+        if self.engine and self.engine.entry_queue:
+            self.engine.flush_entries(t - grace_ms)   # every market has closed these bars: rank and enter
         hour = t // HOUR_MS
         if self.engine and self.last_hour and hour > self.last_hour:
             for coin in list(self.engine.account.positions):

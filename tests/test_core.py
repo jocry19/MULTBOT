@@ -363,8 +363,10 @@ def test_barseries_merge_keeps_live_bars():
 
 
 def test_fixed_mode_every_position_same_margin(cfg):
-    """Fixed mode: unlimited capital, each position = 100 USD margin at max leverage, max 5 open."""
-    assert cfg.account.fixed and cfg.account.position_margin_usd == 100 and cfg.risk.max_open_positions == 5
+    """Fixed mode: unlimited capital, each position = 100 USD margin at max leverage, any number open."""
+    assert cfg.account.fixed and cfg.account.position_margin_usd == 100 and not cfg.risk.max_open_positions
+    assert cfg.reference_capital == 1000
+    cfg.risk.max_open_positions = 5
     assert cfg.reference_capital == 500
     specs = offline_specs(cfg)
     spec = specs[cfg.coins[0]]
@@ -413,3 +415,54 @@ def test_history_cache_refetches_missing_older_range(cfg, tmp_path):
     h = asyncio.run(hmod.fetch_history(cfg, FakeRest(), "BTC", "5m", 1000, with_funding=False))
     assert calls and calls[0] <= now - 999 * 300_000          # fetched from the requested start
     assert len(h.bars) >= 990
+
+
+def test_expected_move_learns_slope_and_shrinks_per_market(cfg):
+    brain = Brain(cfg, ["A", "B"])
+    assert brain.expected_move("A", 0.5, 0.002) is None                 # nothing learned yet
+    rng = np.random.default_rng(0)
+    for _ in range(3000):                                               # pooled: E[norm | s] = 0.4 · s
+        sc = rng.uniform(-1, 1)
+        brain.move.add(sc, 0.4 * sc + rng.normal(0, 1))
+    for _ in range(400):                                                # market B: its own signal is useless
+        sc = rng.uniform(-1, 1)
+        brain.ic_asset["final"]["B"].add(sc, -0.4 * sc + rng.normal(0, 0.2))
+    em = brain.expected_move("A", 0.5, 0.002)
+    assert em == pytest.approx(0.4 * 0.5 * 0.002 * math.sqrt(brain.H), rel=0.25)
+    assert brain.expected_move("A", -0.5, 0.002) == pytest.approx(-em)
+    sb = brain.move_slope("B")
+    assert -0.4 < sb < 0.4 * 0.5                                        # pulled towards B's own (negative) slope
+
+
+def test_entries_ranked_by_expected_roe(cfg):
+    """Candidates of one bar enter best-first; weak expected returns and the per-bar cap are rejected."""
+    cfg.signal.max_new_per_bar = 2
+    specs = offline_specs(cfg, 5)
+    coins = list(specs)
+    engine = Engine(cfg, specs, Brain(cfg, coins), mode="backtest")
+    exp = dict(zip(coins, [0.01, 0.08, -0.02, 0.05, 0.03]))
+    t = 1_700_000_000_000
+    for c in coins:
+        engine.last_analysis[c] = {"t": t, "frow": {}, "an": {"final": 0.6, "pwin": None, "exp_roe": exp[c]}}
+    engine.entry_queue[t] = list(coins)
+    order = []
+
+    def fake_try(coin, spec, an, frow, t_):
+        ok, code, why = engine._entry_checks(coin, spec, an["final"], {"agreement": 1.0}, None,
+                                             type("R", (), {"tradable": True, "label": "TREND-HIGH"})(), {}, t_,
+                                             an["exp_roe"])
+        if ok:
+            order.append(coin)
+        return ok
+
+    engine._try_entry = fake_try
+    engine.exec.spread_bps = lambda coin, t_: 1.0
+    assert engine.flush_entries() == 2
+    assert order == [coins[1], coins[3]]                                # highest expected ROE first, cap 2
+    assert not engine.entry_queue
+    assert engine.last_analysis[coins[4]]["rank"] == (3, 5)
+    assert engine.reject_reasons.get("Ranking") == 3
+    cfg.signal.max_new_per_bar = None
+    ok, code, _ = engine._entry_checks(coins[2], specs[coins[2]], 0.6, {"agreement": 1.0}, None,
+                                       type("R", (), {"tradable": True, "label": "TREND-HIGH"})(), {}, t, -0.02)
+    assert not ok and code == "Erwartung zu klein"

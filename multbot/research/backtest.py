@@ -95,6 +95,7 @@ def run_backtest(cfg: Config, specs: dict[str, MarketSpec], history: dict[str, H
             r = row(f, i)
             r["spread_bps"] = spread[coin]
             engine.on_bar_close(coin, t_close, r, i + 1, trade=trade and t >= train_end_t, learn=learn)
+        engine.flush_entries()   # all markets closed this bar: enter the best-ranked candidates
         engine.mark_equity(t_close)
         if progress and step % 250 == 0:
             progress(step / n_steps)

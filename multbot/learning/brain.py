@@ -7,6 +7,7 @@ Every bar, every strategy's opinion on every asset is recorded as a *pending eva
 * Beta posteriors of each strategy's hit rate – strategies that are reliably wrong get muted
 * an online logistic model that predicts the direction of the next move from ~40 features
 * a meta-label model that predicts whether a trade candidate beats its costs
+* the expected move per unit of signal (pooled over all markets, shrunk per market) – used to rank entries
 * information coefficients (IC) per strategy × horizon / regime / asset and per feature
 * calibration tables and a learning curve
 """
@@ -59,6 +60,7 @@ class Brain:
         self.ic_regime = {k: {r: EWCorr() for r in REGIMES} for k in track}
         self.ic_asset = {k: {c: EWCorr() for c in self.coins} for k in track}
         self.feat_ic = {f: EWCorr() for f in ML_FEATURES}
+        self.move = EWCorr(halflife=20000)   # final score → vol-normalised forward return, all markets
         self.shadow = {k: 0.0 for k in track}
         self.counts = {k: [0, 0] for k in track}  # [n, hits]
         self.cal_ml = Calibration()
@@ -211,6 +213,8 @@ class Brain:
                 self.ic_regime[k][regime].add(s, norm)
             if coin in self.ic_asset[k]:
                 self.ic_asset[k][coin].add(s, norm)
+        if abs(it["final"]) > 0.05:
+            self.move.add(it["final"], norm)
         for name, val in zip(ML_FEATURES, it["x"].tolist()):
             if val != 0.0:
                 self.feat_ic[name].add(val, norm)
@@ -228,6 +232,26 @@ class Brain:
                 self.muted.add(k)
             elif k in self.muted and (arm.mean >= 0.49 or arm.prob_above(0.5) > 0.2):
                 self.muted.discard(k)
+
+    def move_slope(self, coin: str | None = None) -> float | None:
+        """Learned E[vol-normalised return over H | final score] per unit of score (regression through 0).
+        A market's own slope is shrunk towards the pooled one with ``move_shrink`` pseudo-observations."""
+        g = self.move
+        if g.n < 300 or g.mss <= 1e-12:
+            return None
+        b = g.msr / g.mss
+        a = self.ic_asset[FINAL].get(coin) if coin else None
+        if a is not None and a.n >= 30 and a.mss > 1e-12:
+            w, k = min(a.n, a.w), self.cfg.signal.move_shrink
+            b = (w * a.msr / a.mss + k * b) / (w + k)
+        return b
+
+    def expected_move(self, coin: str, final: float, vol: float) -> float | None:
+        """Expected log return over the learning horizon for this signal (signed, fraction of price)."""
+        b = self.move_slope(coin)
+        if b is None:
+            return None
+        return b * final * max(vol, 1e-6) * math.sqrt(self.H)
 
     def learn_trade(self, meta_x, win: bool) -> None:
         """Real closed trades teach the meta model with extra weight."""
@@ -277,6 +301,7 @@ class Brain:
                      "ready": self.meta_ready},
             "hit_recent": float(np.mean(self.recent_final)) if self.recent_final else None,
             "ic_final": self.ic[FINAL][self.H].corr, "muted": sorted(self.muted),
+            "move_slope": self.move_slope(), "move_n": self.move.n,
             "weights": self.hedge_global.weights(),
         }
         if light:
@@ -310,6 +335,7 @@ class Brain:
             "ic_regime": {k: {r: v.to_list() for r, v in d.items()} for k, d in self.ic_regime.items()},
             "ic_asset": {k: {c: v.to_list() for c, v in d.items()} for k, d in self.ic_asset.items()},
             "feat_ic": {f: v.to_list() for f, v in self.feat_ic.items()},
+            "move": self.move.to_list(),
             "shadow": self.shadow, "counts": self.counts,
             "cal_ml": self.cal_ml.to_dict(), "cal_meta": self.cal_meta.to_dict(),
             "curve": self.curve, "recent_final": list(self.recent_final),
@@ -346,6 +372,8 @@ class Brain:
         for f, x in d.get("feat_ic", {}).items():
             if f in self.feat_ic:
                 self.feat_ic[f].load(x)
+        if d.get("move"):
+            self.move.load(d["move"])
         for k, v in d.get("shadow", {}).items():
             if k in self.shadow:
                 self.shadow[k] = float(v)

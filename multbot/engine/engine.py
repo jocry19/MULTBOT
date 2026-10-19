@@ -37,6 +37,7 @@ class CoinView:
     ens: float = 0.0
     p_up: float = 0.5
     pwin: float | None = None
+    exp_roe: float | None = None     # expected net return on the margin (leverage × (move − costs))
     agreement: float = 0.0
     coverage: float = 0.0
     contrib: list = field(default_factory=list)
@@ -80,6 +81,7 @@ class Engine:
         self.last_analysis: dict[str, dict] = {}
         self._last_skip: dict[str, tuple] = {}
         self.ready: set[str] | None = None   # None = all markets ready (backtest/sim)
+        self.entry_queue: dict[int, list[str]] = {}   # bar close time → candidates, ranked in flush_entries
 
     # ── helpers ───────────────────────────────────────────────────────────
     def marks(self) -> dict[str, float]:
@@ -111,10 +113,17 @@ class Engine:
             cost += max(0.0, cand * frow.get("funding_h", 0.0)) * cfg.signal.funding_hold_hours
         meta_x = self.brain.meta_vector(d, frow, cand, regime.label) if cand else None
         pwin = self.brain.p_win(meta_x) if meta_x is not None else None
+        exp_move = exp_roe = None
+        if cand:
+            em = self.brain.expected_move(coin, final, frow.get("vol", 0.0))
+            if em is not None:
+                exp_move = cand * em                                     # favourable move, fraction of price
+                exp_roe = self.specs[coin].leverage * (exp_move - cost)  # net return on the 100 USD margin
         if learn:
             self.brain.observe(coin, t, frow["close"], frow.get("vol", 1e-4), regime.label, d, frow, meta_x, cand,
                                cost)
-        return {"regime": regime, "sig": sig, "d": d, "final": final, "cand": cand, "meta_x": meta_x, "pwin": pwin}
+        return {"regime": regime, "sig": sig, "d": d, "final": final, "cand": cand, "meta_x": meta_x, "pwin": pwin,
+                "exp_move": exp_move, "exp_roe": exp_roe, "cost": cost}
 
     def seed_returns(self, coin: str, closes_t: list[int], rets: list[float]) -> None:
         """History bar returns so correlation guards work from the first live minute."""
@@ -151,7 +160,7 @@ class Engine:
         th = cfg.signal.entry_threshold
 
         v.regime = regime.to_dict()
-        v.final, v.ens, v.p_up, v.pwin = final, d["ens"], d["p_up"], pwin
+        v.final, v.ens, v.p_up, v.pwin, v.exp_roe = final, d["ens"], d["p_up"], pwin, an["exp_roe"]
         v.agreement, v.coverage = d["agreement"], d["coverage"]
         v.contrib = [[k, round(c, 4)] for k, c in d["contrib"]]
         v.signals = {k: [round(sc, 4), why] for k, (sc, why) in sig.items()}
@@ -189,27 +198,70 @@ class Engine:
             return
         self.counters["signals"] += 1
         self.last_analysis[coin] = {"t": t, "an": an, "frow": frow}
+        if cfg.signal.rank_entries:
+            self.entry_queue.setdefault(t, []).append(coin)   # entered best-first in flush_entries
+            v.status = "KANDIDAT"
+            return
         self._try_entry(coin, spec, an, frow, t)
+
+    def _rank_key(self, coin: str) -> tuple:
+        an = self.last_analysis[coin]["an"]
+        er = an.get("exp_roe")
+        if er is not None:
+            return (1, er)
+        return (0, abs(an["final"]) * self.specs[coin].leverage)   # before the move model has learned
+
+    def flush_entries(self, upto: int | None = None) -> int:
+        """Enter the queued candidates of each closed bar best-first: highest expected net return on the
+        margin (expected move × leverage − costs × leverage) first, so concentration and correlation limits
+        and ``max_new_per_bar`` always keep the better trades."""
+        entered = 0
+        for t in sorted(k for k in self.entry_queue if upto is None or k <= upto):
+            coins = [c for c in self.entry_queue.pop(t) if self.last_analysis.get(c, {}).get("t") == t]
+            ranked = sorted(coins, key=self._rank_key, reverse=True)
+            cap = self.cfg.signal.max_new_per_bar
+            new = 0
+            for i, coin in enumerate(ranked):
+                if coin in self.account.positions or coin in self.pending_orders:
+                    continue
+                la = self.last_analysis[coin]
+                la["rank"] = (i + 1, len(ranked))
+                if cap and new >= cap:
+                    self._reject(coin, t, "Ranking", f"nicht unter den besten {cap} dieser Bar (Rang {i + 1}/"
+                                 f"{len(ranked)})", la["an"])
+                    continue
+                if self._try_entry(coin, self.specs[coin], la["an"], la["frow"], t):
+                    new += 1
+                elif coin in self.awaiting_book:
+                    new += 1   # keeps its rank while its order book loads
+            entered += new
+        return entered
 
     def _try_entry(self, coin: str, spec, an: dict, frow: dict, t: int) -> bool:
         final, d, pwin = an["final"], an["d"], an["pwin"]
         v = self.views[coin]
-        ok, code, reason = self._entry_checks(coin, spec, final, d, pwin, an["regime"], frow, t)
+        ok, code, reason = self._entry_checks(coin, spec, final, d, pwin, an["regime"], frow, t, an.get("exp_roe"))
         if ok and self.mode == "live" and not self.exec.book_fresh(coin, t):
             # unfocused market: subscribe its order book first, enter as soon as it arrives (retry_entry)
             self.awaiting_book[coin] = t
             v.status = "WARTE AUF ORDERBUCH"
             return False
         if not ok:
-            v.status = f"GESPERRT: {reason}"
-            self.counters["rejected"] += 1
-            self.reject_reasons[code] = self.reject_reasons.get(code, 0) + 1
-            self._log_skip(t, coin, code, f"{'LONG' if final > 0 else 'SHORT'}-Signal {final:+.2f} verworfen: {reason}",
-                           {"final": final, "pwin": pwin})
+            self._reject(coin, t, code, reason, an)
             return False
         self.awaiting_book.pop(coin, None)
-        self._enter(coin, spec, 1 if final > 0 else -1, d, pwin, an["meta_x"], an["regime"].label, frow, t)
+        la = self.last_analysis.get(coin) or {}
+        exp = {"exp_roe": an.get("exp_roe"), "exp_move": an.get("exp_move"), "rank": la.get("rank")}
+        self._enter(coin, spec, 1 if final > 0 else -1, d, pwin, an["meta_x"], an["regime"].label, frow, t, exp)
         return True
+
+    def _reject(self, coin: str, t: int, code: str, reason: str, an: dict) -> None:
+        final = an["final"]
+        self.views[coin].status = f"GESPERRT: {reason}"
+        self.counters["rejected"] += 1
+        self.reject_reasons[code] = self.reject_reasons.get(code, 0) + 1
+        self._log_skip(t, coin, code, f"{'LONG' if final > 0 else 'SHORT'}-Signal {final:+.2f} verworfen: {reason}",
+                       {"final": final, "pwin": an["pwin"], "exp_roe": an.get("exp_roe")})
 
     def retry_entry(self, coin: str, now: int) -> bool:
         """Called when the order book of a waiting candidate arrives (live)."""
@@ -248,10 +300,11 @@ class Engine:
     def candidates(self, limit: int = 40) -> list[str]:
         """Markets with the strongest current signals (for order-book focus)."""
         th = 0.5 * self.cfg.signal.entry_threshold
-        rows = [(abs(v.final), c) for c, v in self.views.items() if abs(v.final) >= th]
+        rows = [((v.exp_roe is not None, v.exp_roe if v.exp_roe is not None else abs(v.final)), c)
+                for c, v in self.views.items() if abs(v.final) >= th]
         return [c for _, c in sorted(rows, reverse=True)[:limit]]
 
-    def _entry_checks(self, coin, spec, final, d, pwin, regime, frow, t) -> tuple[bool, str, str]:
+    def _entry_checks(self, coin, spec, final, d, pwin, regime, frow, t, exp_roe=None) -> tuple[bool, str, str]:
         """Returns (ok, reason_code, human_text)."""
         cfg, r = self.cfg, self.cfg.risk
         side = 1 if final > 0 else -1
@@ -268,7 +321,10 @@ class Engine:
             return False, gate[0], gate[1]
         if pwin is not None and pwin < cfg.signal.min_pwin:
             return False, "Meta-Modell: Kante zu klein", f"Meta-Modell P(Gewinn) {pwin:.1%} < {cfg.signal.min_pwin:.0%}"
-        if len(self.account.positions) + len(self.pending_orders) >= r.max_open_positions:
+        if exp_roe is not None and cfg.signal.min_exp_roe is not None and exp_roe < cfg.signal.min_exp_roe:
+            return False, "Erwartung zu klein", (f"erwartete Rendite {exp_roe:+.1%} auf die Margin nach Kosten "
+                                                 f"< {cfg.signal.min_exp_roe:+.1%}")
+        if r.max_open_positions and len(self.account.positions) + len(self.pending_orders) >= r.max_open_positions:
             return False, "max. Positionen", f"max. {r.max_open_positions} Positionen offen"
         spread = self.exec.spread_bps(coin, t)
         if spread > r.max_spread_bps:
@@ -284,6 +340,8 @@ class Engine:
             return False, "Funding-Wächter", f"Funding {fund_bps:.1f} bps gegen uns in {to_funding_min:.0f} min"
         same = [o for o, p in self.account.positions.items() if p.side == side]
         same += [o for o, po in self.pending_orders.items() if po["side"] == side]
+        same += [o for o in self.awaiting_book if o != coin and o in self.last_analysis    # better-ranked, book loading
+                 and (self.last_analysis[o]["an"]["final"] > 0) == (side > 0)]
         cls = spec.asset_class
         n_cls = sum(1 for o in same if self.specs[o].asset_class == cls)
         if r.max_same_class_side and n_cls >= r.max_same_class_side:
@@ -298,7 +356,7 @@ class Engine:
     def reserved_margin(self) -> float:
         return self.account.used_margin() + sum(p["margin"] for p in self.pending_orders.values())
 
-    def _enter(self, coin, spec, side, d, pwin, meta_x, regime_label, frow, t) -> None:
+    def _enter(self, coin, spec, side, d, pwin, meta_x, regime_label, frow, t, exp: dict | None = None) -> None:
         ref = self.last_px.get(coin, frow["close"])
         maker = self.cfg.execution.entry_mode == "maker"
         px = self.exec.maker_price(coin, side, ref, t) if maker else ref
@@ -317,7 +375,7 @@ class Engine:
         ctx = {"coin": coin, "side": side, "size": order.size, "leverage": order.leverage,
                "stop_dist": order.stop_dist, "margin": order.margin, "d": d, "pwin": pwin, "meta_x": meta_x,
                "regime": regime_label, "atr": frow.get("atr", 0.0), "notes": order.notes,
-               "margin_pct": order.margin_pct, "created": t, "bars": 0, "limit": px}
+               "margin_pct": order.margin_pct, "created": t, "bars": 0, "limit": px, "exp": exp or {}}
         if maker:
             self.pending_orders[coin] = ctx
             self.counters["orders"] += 1
@@ -387,7 +445,8 @@ class Engine:
             meta_x=meta_x.tolist() if meta_x is not None else None,
             decision={"ens": round(d["ens"], 4), "p_up": round(d["p_up"], 4), "agreement": round(d["agreement"], 3),
                       "coverage": round(d["coverage"], 3), "contrib": [[k, round(c, 4)] for k, c in d["contrib"]],
-                      "notes": ctx["notes"], "margin_pct": round(ctx["margin_pct"], 4), "fill": fill.source},
+                      "notes": ctx["notes"], "margin_pct": round(ctx["margin_pct"], 4), "fill": fill.source,
+                      **{k: v for k, v in ctx.get("exp", {}).items() if v is not None}},
         )
         try:
             self.account.open(pos)
@@ -398,10 +457,13 @@ class Engine:
         lp = pos.liq_price()
         self.views[coin].status = f"{'LONG' if side > 0 else 'SHORT'} {ctx['leverage']}x"
         pw = f"{pwin:.0%}" if pwin is not None else "n/a"
+        exp = ctx.get("exp") or {}
+        er = f"E[ROE] {exp['exp_roe']:+.1%}" if exp.get("exp_roe") is not None else "E[ROE] lernt noch"
+        rk = f" · Rang {exp['rank'][0]}/{exp['rank'][1]}" if exp.get("rank") else ""
         self.log_event(
             t, coin, "ENTRY",
             f"{'LONG' if side > 0 else 'SHORT'} {ctx['leverage']}x @ {fill.px:.6g} ({fill.source}) | Score "
-            f"{d['final']:+.2f} (Einigkeit {d['agreement']:.0%}, P(Gewinn) {pw}) | Margin {margin:.2f} USD → "
+            f"{d['final']:+.2f} (Einigkeit {d['agreement']:.0%}, P(Gewinn) {pw}) | {er}{rk} | Margin {margin:.2f} USD → "
             f"Notional {notional:.2f} USD | Stop {stop_px:.6g} · TP {tp_px:.6g} · Liq {lp:.6g} | Slippage "
             f"{fill.slippage_bps:+.1f} bps, Gebühr {fill.fee:.4f} | {ctx['regime']} | " + ", ".join(reasons),
             {"side": side, "px": fill.px, "size": ctx["size"], "margin": margin, "stop": stop_px, "tp": tp_px,
@@ -608,6 +670,7 @@ class Engine:
         row = {"coin": coin, "symbol": s.symbol, "dex": s.dex or "main", "cls": s.asset_class, "lev": s.leverage,
                "px": px, "final": round(v.final, 4), "p_up": round(v.p_up, 4),
                "pwin": None if v.pwin is None else round(v.pwin, 4), "status": v.status,
+               "eroe": None if v.exp_roe is None else round(v.exp_roe, 4),
                "regime": r.get("label", ""), "tradable": r.get("tradable", True),
                "spread": round(fe.get("spread_bps", 0.0), 2), "ready": self.ready is None or coin in self.ready}
         if m and m.ctx_ms:
