@@ -869,15 +869,17 @@
         metric("Gehörte Statistiken", L.statistics, "", "je Markt und Kerze, inkl. Stimmung aller Märkte") +
         metric("Gelernte Sätze", (L.learned || 0).toLocaleString(), "", `${(L.read || 0).toLocaleString()} gelesen`) +
         metric("Treffsicherheit (IC)", f(L.ic, 3), cls(L.ic), "zuletzt · gesamt " + f(L.ic_long, 3)) +
+        metric("Wer läuft besser?", f(L.ic_rel, 3), cls(L.ic_rel), "IC der Märkte untereinander (relativ zur Klasse)") +
+        metric("Gesamtmarkt sagt", esc((L.market || {}).label || "-"), "", Object.entries((L.market || {}).classes || {}).map(([k, v]) => `${esc(k)} ${sgn(v, 2)}σ`).join(" · ") || "lernt noch") +
         metric("Richtung richtig", pct(L.hit, 1), cls((L.hit || 0.5) - 0.5), `bei lauten Aussagen (n=${(L.hit_n || 0).toLocaleString()})`) +
         metric("Gedächtnis", mem || "-", "", (L.memories || []).map((m) => m.days + " d").join(" / ") + " Halbwertszeit") + metric("Horizont", L.horizon + " Kerzen") + `</div>` +
         `<p class="note">Keine festen Strategien, kein festes Alphabet. <b>Laute:</b> jede einzelne Statistik (Kurs, Momentum, Lage in der Range, Volatilität, Volumen, Orderfluss, Orderbuch, Funding, Prämie, Open Interest, Leitmarkt, Tageszeit und die Stimmung aller Märkte) wird daran gemessen, wie sich <i>dieser</i> Markt zuletzt verhalten hat. ` +
         `<b>Wörter:</b> Über acht Sinne bildet der Bot seinen Wortschatz selbst – ein neuer Klang lässt ein neues Wort entstehen, ungenutzte Wörter werden vergessen. ` +
-        `<b>Bedeutung:</b> Was nach einem Satz (Wörter, ihre Veränderung, ihr Zusammenspiel mit der Bewegung, Dialekt des Markts) passiert, lernt er live mit drei unterschiedlich schnell vergessenden Gedächtnissen. ` +
+        `<b>Bedeutung:</b> Was nach einem Satz (Wörter, ihre Veränderung, ihr Zusammenspiel mit der Bewegung, Dialekt des Markts) passiert, lernt er live mit drei unterschiedlich schnell vergessenden Gedächtnissen. Auch der <b>Gesamtmarkt</b> spricht – er lernt einmal je Kerze und Anlageklasse, was alle zusammen tun; jeder einzelne Markt lernt, was er <i>im Vergleich</i> zu den anderen tut. ` +
         `<b>Sprechen = Handeln:</b> Jede Aussage wird mit dem überprüft, was danach wirklich passiert ist. Gehandelt wird nur, wenn die so geglaubte Bewegung (skeptisch gerechnet) die Kosten schlägt – trifft seine Sprache nicht mehr zu, verstummt er von selbst.</p>`);
       const now = Object.entries(L.now || {}).sort((a, b) => Math.abs(b[1].s) - Math.abs(a[1].s));
       const words = (x) => (x.words || []).map((w) => `<span class="tag" title="${esc(w.sense)}: ${esc(w.label)}">${esc(w.code)}</span>`).join("");
-      const why = (x) => (x.why || []).filter(([n]) => n !== "Grundton").slice(0, 2).map(([n, c]) => {
+      const why = (x) => (x.why || []).slice(0, 2).map(([n, c]) => {
         const w = (x.words || []).find((y) => y.sense === n);
         return `<span class="${cls(c)}">${esc(n)}${w ? " „" + esc(w.label) + "“" : ""} ${sgn(c, 2)}</span>`;
       }).join("<br>");
@@ -902,8 +904,10 @@
       const cur = L.curve || [];
       CH.line(cv("lgcurve"), { xType: "num", zero: true, xFmt: (v) => Math.round(v).toLocaleString(), yFmt: (v) => v.toFixed(3), empty: "Lernkurve erscheint nach den ersten 500 überprüften Aussagen",
         series: [{ data: cur.map((p) => [p.n, p.ic]), color: CH.C.cyan, label: "IC zuletzt" },
-          { data: cur.filter((p) => isNum(p.ic_long)).map((p) => [p.n, p.ic_long]), color: CH.C.violet, label: "IC gesamt" }, { data: cur.filter((p) => p.hit !== null).map((p) => [p.n, p.hit - 0.5]), color: CH.C.amber, label: "Treffer − 50 %" }] });
-      setR("lgcurve", '<span class="cyan">■ IC zuletzt</span> <span class="violet">■ IC gesamt</span> <span class="amber">■ Treffer−50%</span>');
+          { data: cur.filter((p) => isNum(p.ic_long)).map((p) => [p.n, p.ic_long]), color: CH.C.violet, label: "IC gesamt" },
+          { data: cur.filter((p) => isNum(p.ic_rel)).map((p) => [p.n, p.ic_rel]), color: CH.C.up, label: "IC relativ" },
+          { data: cur.filter((p) => p.hit !== null).map((p) => [p.n, p.hit - 0.5]), color: CH.C.amber, label: "Treffer − 50 %" }] });
+      setR("lgcurve", '<span class="cyan">■ IC zuletzt</span> <span class="violet">■ IC gesamt</span> <span class="up">■ IC relativ</span> <span class="amber">■ Treffer−50%</span>');
     },
   };
 

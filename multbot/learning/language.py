@@ -19,10 +19,14 @@ currently sounds like ("Bar/σ⇈ Volumen↑").
 
 **Meaning (Bedeutung).** What a market says in one bar is a sentence: one word per sense, how each word changed
 since the last bar (transitions), each word together with the movement word, the market's own dialect and that
-of its asset class. Every phrase gets a learned meaning – its contribution to the move over the horizon in units
-of volatility – fitted online on the joint residual, with pseudo-counts so that a phrase needs evidence before it
-means anything. Three memories forget at different speeds (half-life 1, 5 and 25 days by default); they are
-weighted by how well each has predicted lately – the bot learns how fast the market's language changes.
+of its asset class. The whole market speaks as well: its own vocabulary over the mood of all markets, how that
+word changed and the hour of the day. Markets that move together are not independent evidence, so learning is
+split in two: the average outcome of an asset class in a bar teaches the whole-market phrases once per bar, and
+each market's deviation from its class teaches that market's own sentence. Every phrase gets a learned meaning –
+its contribution to the move over the horizon in units of volatility – fitted online on the joint residual, with
+pseudo-counts so that a phrase needs evidence before it means anything. Three memories forget at different speeds
+(half-life 1, 5 and 25 days by default); they are weighted by how well each has predicted lately – the bot learns
+how fast the market's language changes.
 
 **Listening in context.** A single sentence is noisy: the decision uses what the market has been saying lately
 (exponentially smoothed, half-life ≈ a third of the horizon).
@@ -91,6 +95,7 @@ MEMORY_NAMES = ("kurz", "mittel", "lang")
 TABLE = 1 << 17                 # hashed phrase table
 _M64 = (1 << 64) - 1
 PRIOR_COUNT = 100.0             # pseudo-observations before a phrase means anything (shrinks rare phrases to 0)
+PRIOR_BARS = 50.0               # … for the whole-market phrases (one observation per bar and asset class)
 NORM_DAYS = 2.0                 # "recent behaviour" of a statistic: half-life of the per-market mean / variance
 NORM_WARMUP = 12                # bars per market before its statistics make sounds
 CONVICTION_EDGES = (0.5, 1.0, 1.5, 2.0, 3.0)   # |statement| in units of the RMS of everything said
@@ -273,7 +278,7 @@ class _Vocab:
 
 
 class MarketLanguage:
-    VERSION = 3
+    VERSION = 4
 
     def __init__(self, horizon: int, bars_per_hour: float = 12.0, max_words: int = 32,
                  memory_days: tuple | list = (1.0, 5.0, 25.0), trust_prior: float = 0.10, proof_sd: float = 0.0):
@@ -291,6 +296,12 @@ class MarketLanguage:
         self._get_base = itemgetter(*self.base_keys)
         self.vocab = _Vocab([(k, n, st, [pos[s] for s in st]) for k, n, st in CHANNELS], max_words, self.D)
         self.G = self.vocab.G
+        # the whole market speaks too: its own vocabulary over the mood of all markets (one word per bar)
+        nmk = len(MOOD_KEYS)
+        self.mkt_vocab = _Vocab([("M", "Gesamtmarkt", MOOD_KEYS, list(range(nmk)))], max_words, nmk)
+        self.mkt_norm: list = [np.zeros(nmk), np.zeros(nmk), 0.0]
+        self.mkt_slot = -1
+        self.mkt_word = self.mkt_prev = -1
         self.lam_norm = 0.5 ** (1.0 / (NORM_DAYS * 24 * self.bph))
         self.norm: dict[str, list] = {}
         # meaning: hashed phrase table, one row per memory speed. Forgetting is a global scale per memory
@@ -331,10 +342,16 @@ class MarketLanguage:
         self.lam_cell = 0.5 ** (1.0 / TRUST_HALFLIFE_BARS)
         self.batch_t = None
         self.batch = np.zeros((nc, 2))
+        # learning happens per bar: what all markets of a class did together, and what each did relative to it
+        self.resolved: list[dict] = []
+        self.res_t = None
+        self.cls_name: dict[int, str] = {}
+        self.cls_pred: dict[int, float] = {}
         # scoring
         self.acc_n = self.acc_hits = 0
         self.ic = [0.0] * 6
         self.ic_long = [0.0] * 6
+        self.ic_rel = [0.0] * 6
         self.curve: list[dict] = []
         self.n_learned = self.n_read = self.n_scored = 0
 
@@ -352,6 +369,10 @@ class MarketLanguage:
                 self.mood = np.array([c[1] / n, mr, math.sqrt(max(c[3] / n - mr * mr, 0.0)), c[4] / n, c[5] / n,
                                       c[6] / n, c[7] / n])
                 self.mood_hist.append([int(self.cur_t)] + [round(float(x), 4) for x in self.mood])
+                z = np.zeros(len(MOOD_KEYS) + 1)
+                z[:-1] = self._normalize(self.mkt_norm, self.mood.copy(), True)
+                self.mkt_slot = int(self.mkt_vocab.hear(z, self.cur_t, True)[0])
+                self.mkt_prev, self.mkt_word = self.mkt_word, int(self.mkt_vocab.uid[0, self.mkt_slot])
             self.cur_t = t
             self.cur = np.zeros(8)
         if t == self.cur_t:
@@ -380,12 +401,22 @@ class MarketLanguage:
         st = self.norm.get(coin)
         if st is None:
             st = self.norm[coin] = [x.copy(), np.zeros(self.D), 0.0]
-        m, v, w = st
         z = np.zeros(self.D + 1)
+        z[: self.D] = self._normalize(st, x, learn)
+        return z
+
+    def _normalize(self, st: list, x: np.ndarray, learn: bool) -> np.ndarray:
+        """z-scores against an exponentially forgetting mean / variance (prequential), then learn from x."""
+        m, v, w = st
         if w >= NORM_WARMUP:
             live = v > 1e-18 + 1e-10 * m * m
-            z[: self.D] = np.clip(np.where(live, (x - m) / np.sqrt(np.where(live, v, 1.0)), 0.0), -4.0, 4.0)
+            z = np.clip(np.where(live, (x - m) / np.sqrt(np.where(live, v, 1.0)), 0.0), -4.0, 4.0)
+        else:
+            z = np.zeros(len(x))
         if learn:
+            if w == 0:
+                st[0], st[2] = x.copy(), 1.0
+                return z
             d = x - m
             if w >= NORM_WARMUP:                 # winsorise: one wild print cannot deafen the market
                 lim = 5.0 * np.sqrt(v) + 1e-12
@@ -409,8 +440,8 @@ class MarketLanguage:
     def _make_layout(self, with_prev: bool) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Phrase order of a sentence → (phrase index, sense bucket, weight) for the attribution."""
         G = self.G
-        pos, owner, wt = [0], [G + 1], [1.0]            # base tone
-        i = 1
+        pos, owner, wt = [], [], []
+        i = 0
         for g in range(G):
             n = 3 if with_prev else 2                     # word, class dialect, (transition)
             for _ in range(n):
@@ -433,12 +464,10 @@ class MarketLanguage:
         cid = self.cid.get(coin)
         if cid is None:
             cid = self.cid[coin] = _sid(coin)
-        kid = self.cid.get("\0" + (cls or "-"))
-        if kid is None:
-            kid = self.cid["\0" + (cls or "-")] = _sid(cls or "-")
+        kid = self._class_id(cls)
         hs = self._hash
         w0 = words[0]
-        ids = [hs((1,))]
+        ids = []
         for g in range(self.G):
             wg = words[g]
             ids.append(hs((2, g, wg)))
@@ -450,6 +479,22 @@ class MarketLanguage:
         ids.append(hs((6, cid)))
         ids.append(hs((7, cid, w0)))
         return np.array(ids, dtype=np.int64)
+
+    def _class_id(self, cls: str) -> int:
+        key = "\0" + (cls or "-")
+        kid = self.cid.get(key)
+        if kid is None:
+            kid = self.cid[key] = _sid(cls or "-")
+            self.cls_name[kid] = cls or "-"
+        return kid
+
+    def _market_phrases(self, kid: int, t: int) -> np.ndarray:
+        """What the whole market of this asset class is saying: its word, how it changed, the hour (weekday or
+        weekend). Learned once per bar and class – markets moving together are one observation, not hundreds."""
+        hs = self._hash
+        hour = int((t // 3_600_000) % 24) + 24 * int(((t // 86_400_000) + 3) % 7 >= 5)
+        return np.array([hs((11, kid)), hs((12, kid, hour)), hs((13, kid, self.mkt_word)),
+                         hs((14, kid, self.mkt_prev, self.mkt_word))], dtype=np.int64)
 
     def _mix(self) -> np.ndarray:
         if self.mix_w <= 0:
@@ -494,9 +539,13 @@ class MarketLanguage:
         words = [w if j >= 0 else -1 for w, j in zip(words, slots.tolist())]
         prev = self.prev.get(coin)
         idx = self._phrases(coin, cls, words, prev)
-        mix = self._mix()
-        per = (mix * self.scale) @ self.W[:, idx]
-        pred = float(per.sum())
+        kid = self._class_id(cls)
+        cidx = self._market_phrases(kid, t)
+        ms = self._mix() * self.scale
+        per = ms @ self.W[:, idx]
+        pred_i = float(per.sum())                    # what this market says relative to its class
+        pred_m = float((ms @ self.W[:, cidx]).sum())  # what the whole class is saying
+        pred = pred_i + pred_m
         s_prev = self.said.get(coin)
         s = pred if s_prev is None else s_prev + self.alpha * (pred - s_prev)
         if learn:
@@ -510,22 +559,24 @@ class MarketLanguage:
         vol = max(float(frow.get("vol", 1e-4)), 1e-6)
         exp_move = max(believed, 0.0) * vol * math.sqrt(self.H)
         lp, lo, lw = self._layout[prev is not None]
-        by = np.bincount(lo, weights=per[lp] * lw, minlength=self.G + 2)   # senses, dialect, base tone
+        by = np.bincount(lo, weights=per[lp] * lw, minlength=self.G + 2)   # senses, dialect, whole market
+        by[self.G + 1] = pred_m
         slots_l = slots.tolist()
         out = {"pred": pred, "s": s, "side": side, "believed": believed, "raw": raw, "bars": bars, "cell": cell,
                "exp_move": exp_move, "contrib": by, "slots": slots_l}
         if learn:
             self.pending.setdefault(coin, deque()).append(
-                {"idx": idx, "px": float(frow["close"]), "vol": vol, "pred": pred, "s": s, "cell": cell,
-                 "age": 0, "t": t, "pre": pretrain})
+                {"idx": idx, "cidx": cidx, "kid": kid, "px": float(frow["close"]), "vol": vol, "pred": pred,
+                 "pred_i": pred_i, "s": s, "cell": cell, "age": 0, "t": t, "pre": pretrain})
             self.n_read += 1
+            self.cls_pred[kid] = pred_m
             self.recent[coin] = {"t": t, "pred": pred, "s": s, "believed": believed, "bars": bars,
                                  "exp_bps": exp_move * 1e4, "contrib": by, "slots": slots_l}
             self.sentences.setdefault(coin, deque(maxlen=6)).append(slots_l)
         return out
 
     def names(self) -> list[str]:
-        return list(self.vocab.names) + ["Eigenart", "Grundton"]
+        return list(self.vocab.names) + ["Eigenart", "Gesamtmarkt"]
 
     def why(self, lp: dict, n: int = 6) -> list[tuple[str, float]]:
         return sorted(zip(self.names(), [round(float(c), 4) for c in lp["contrib"]]), key=lambda x: -abs(x[1]))[:n]
@@ -562,35 +613,62 @@ class MarketLanguage:
         while q and q[0]["age"] >= self.H:
             it = q.popleft()
             ret = math.log(max(close, 1e-300) / max(it["px"], 1e-300))
-            y = max(-4.0, min(4.0, ret / (it["vol"] * math.sqrt(self.H))))
-            self._learn(it["idx"], y)
-            if not it["pre"]:
-                self._score(it, y, t)
+            it["y"] = max(-4.0, min(4.0, ret / (it["vol"] * math.sqrt(self.H))))
+            if self.res_t is not None and it["t"] != self.res_t:
+                self._learn_bar()
+            self.res_t = it["t"]
+            self.resolved.append(it)
             learned += 1
         self.n_learned += learned
         return learned
 
-    def _learn(self, idx: np.ndarray, y: float) -> None:
-        """Every memory fits all phrases of the sentence jointly on its residual (count-preconditioned)."""
+    def _learn_bar(self) -> None:
+        """All outcomes of one read bar: each class's average teaches the whole-market phrases (one observation),
+        each market's deviation from its class teaches that market's own sentence."""
+        items, self.resolved, self.res_t = self.resolved, [], None
+        by: dict[int, list] = {}
+        for it in items:
+            by.setdefault(it["kid"], []).append(it)
+        for its in by.values():
+            ybar = sum(it["y"] for it in its) / len(its)
+            self._update(its[0]["cidx"], ybar, PRIOR_BARS, False)
+            alone = len(its) < 2
+            for it in its:
+                r = None if alone else it["y"] - ybar
+                if r is not None:
+                    self._update(it["idx"], r, PRIOR_COUNT, True)
+                if not it["pre"]:
+                    self._score(it, it["y"], r)
+
+    def _update(self, idx: np.ndarray, y: float, prior: float, track: bool) -> None:
+        """Every memory fits the phrases jointly on its residual (count-preconditioned, shrunk by the prior)."""
         sc = self.scale[:, None]
         err = y - (self.W[:, idx] * sc).sum(1)
-        self.mix_w = self.lam_mix * self.mix_w + 1.0
-        self.mix_loss = self.lam_mix * self.mix_loss + np.minimum(err * err, 16.0)
+        if track:
+            self.mix_w = self.lam_mix * self.mix_w + 1.0
+            self.mix_loss = self.lam_mix * self.mix_loss + np.minimum(err * err, 16.0)
         self.N[:, idx] += 1.0 / sc
-        step = 1.0 / (self.N[:, idx] * sc + PRIOR_COUNT)
+        step = 1.0 / (self.N[:, idx] * sc + prior)
         step /= np.maximum(step.sum(1, keepdims=True), 1.0)
         self.W[:, idx] += step * np.clip(err, -4.0, 4.0)[:, None] / sc
 
-    def _score(self, it: dict, y: float, t: int) -> None:
+    @staticmethod
+    def _corr_add(s: list, x: float, y: float, lam: float) -> None:
+        s[0] = lam * s[0] + 1.0
+        a = 1.0 / s[0]
+        s[1] += a * (x - s[1])
+        s[2] += a * (y - s[2])
+        s[3] += a * (x * x - s[3])
+        s[4] += a * (y * y - s[4])
+        s[5] += a * (x * y - s[5])
+
+    def _score(self, it: dict, y: float, rel: float | None) -> None:
         pred = it["pred"]
-        for s, lam in ((self.ic, 0.9995), (self.ic_long, 0.99998)):
-            s[0] = lam * s[0] + 1.0
-            a = 1.0 / s[0]
-            s[1] += a * (pred - s[1])
-            s[2] += a * (y - s[2])
-            s[3] += a * (pred * pred - s[3])
-            s[4] += a * (y * y - s[4])
-            s[5] += a * (pred * y - s[5])
+        self._corr_add(self.ic, pred, y, 0.9995)
+        self._corr_add(self.ic_long, pred, y, 0.99998)
+        if rel is not None:   # does it hear which market will do better than the others?
+            self._corr_add(self.ic_rel, it["pred_i"], rel, 0.99998)
+        t = self.clock_t
         r = self.rms
         if r > 0 and abs(it["s"]) >= r and y != 0:
             self.acc_n += 1
@@ -605,7 +683,7 @@ class MarketLanguage:
         self.n_scored += 1
         if self.n_scored % 500 == 0:
             self.curve.append({"t": t, "n": self.n_scored, "ic": self.ic_value(), "ic_long": self.ic_value(True),
-                               "hit": self.hit_rate(), "words": self.n_words()})
+                               "ic_rel": self.ic_value(rel=True), "hit": self.hit_rate(), "words": self.n_words()})
             if len(self.curve) > 2000:
                 self.curve = self.curve[::2]
 
@@ -619,8 +697,8 @@ class MarketLanguage:
             self.cell[c] = [w, mean + a * d, (1 - a) * (var + a * d * d), n + self.batch[c, 1]]
         self.batch[:] = 0.0
 
-    def ic_value(self, long: bool = False) -> float:
-        _, mx, my, mxx, myy, mxy = self.ic_long if long else self.ic
+    def ic_value(self, long: bool = False, rel: bool = False) -> float:
+        _, mx, my, mxx, myy, mxy = self.ic_rel if rel else self.ic_long if long else self.ic
         vx, vy = mxx - mx * mx, myy - my * my
         return float((mxy - mx * my) / math.sqrt(vx * vy)) if vx > 1e-12 and vy > 1e-12 else 0.0
 
@@ -662,6 +740,27 @@ class MarketLanguage:
             senses.append({"key": V.keys[g], "name": V.names[g], "stats": st, "words": words,
                            "births": int(V.births[g]), "deaths": int(V.deaths[g]), "kmax": int(V.kmax[g])})
         transitions.sort(key=lambda x: -x[0])
+        # the whole market's own vocabulary (meaning shown for the asset class it is heard in most)
+        M = self.mkt_vocab
+        k = int(M.k[0])
+        kid = max(self.cls_pred, key=lambda c: self.cls_name.get(c) == "crypto") if self.cls_pred else None
+        mwords = []
+        if k:
+            share = M.use[0, :k] / max(float(M.use[0, :k].sum()), 1e-12)
+            mean = np.zeros(k)
+            if kid is not None:
+                mean, _ = self._meaning(np.array([_h(13, kid, int(u)) for u in M.uid[0, :k]], dtype=np.int64))
+            for j in range(k):
+                p = M.P[0, j, : len(MOOD_KEYS)]
+                mwords.append({"code": M.code(0, j), "label": M.label(0, j), "share": round(float(share[j]), 4),
+                               "meaning": round(float(mean[j]), 4), "evidence": 0, "born": int(M.born[0, j]),
+                               "sound": [[MOOD_KEYS[i], round(float(p[i]), 2)] for i in np.argsort(-np.abs(p))[:4]]})
+            mwords.sort(key=lambda x: -x["share"])
+        senses.append({"key": "M", "name": "Gesamtmarkt", "stats": MOOD_KEYS, "words": mwords,
+                       "births": int(M.births[0]), "deaths": int(M.deaths[0]), "kmax": int(M.kmax[0])})
+        market = {"code": M.code(0, self.mkt_slot) if self.mkt_slot >= 0 else "-",
+                  "label": M.label(0, self.mkt_slot) if self.mkt_slot >= 0 else "-",
+                  "classes": {self.cls_name.get(c, "?"): round(v, 4) for c, v in self.cls_pred.items()}}
         nb = len(CONVICTION_EDGES) + 1
         edges = (0.0,) + CONVICTION_EDGES
         cells = []
@@ -690,7 +789,8 @@ class MarketLanguage:
         mix = self._mix()
         return {
             "version": self.VERSION, "horizon": self.H, "learned": self.n_learned, "read": self.n_read,
-            "ic": self.ic_value(), "ic_long": self.ic_value(True), "hit": self.hit_rate(), "hit_n": self.acc_n,
+            "ic": self.ic_value(), "ic_long": self.ic_value(True), "ic_rel": self.ic_value(rel=True),
+            "hit": self.hit_rate(), "hit_n": self.acc_n, "market": market,
             "words": self.n_words(), "births": int(V.births.sum()), "deaths": int(V.deaths.sum()),
             "statistics": self.D,
             "memories": [{"name": nm, "days": d, "weight": round(float(w), 4)}
@@ -714,7 +814,11 @@ class MarketLanguage:
                 "norm": {c: [st[0].tolist(), st[1].tolist(), st[2]] for c, st in self.norm.items()},
                 "prev": self.prev, "said": self.said, "mood": self.mood.tolist(), "ms2": [self.ms2_w, self.ms2],
                 "cell": self.cell.tolist(), "batch": self.batch.tolist(), "batch_t": self.batch_t,
-                "acc": [self.acc_n, self.acc_hits], "ic": self.ic, "ic_long": self.ic_long,
+                "acc": [self.acc_n, self.acc_hits], "ic": self.ic, "ic_long": self.ic_long, "ic_rel": self.ic_rel,
+                "mkt": {"vocab": self.mkt_vocab.to_dict(), "norm": [self.mkt_norm[0].tolist(),
+                                                                    self.mkt_norm[1].tolist(), self.mkt_norm[2]],
+                        "slot": self.mkt_slot, "word": self.mkt_word, "prev": self.mkt_prev},
+                "cls_name": {str(k): v for k, v in self.cls_name.items()},
                 "curve": self.curve[-500:], "n": [self.n_learned, self.n_read, self.n_scored]}
 
     def load(self, d: dict) -> None:
@@ -749,5 +853,14 @@ class MarketLanguage:
             self.ic = [float(x) for x in d["ic"]]
         if len(d.get("ic_long", [])) == 6:
             self.ic_long = [float(x) for x in d["ic_long"]]
+        if len(d.get("ic_rel", [])) == 6:
+            self.ic_rel = [float(x) for x in d["ic_rel"]]
+        mk = d.get("mkt") or {}
+        self.mkt_vocab.load(mk.get("vocab", {}))
+        if len(mk.get("norm", [[]])[0]) == len(MOOD_KEYS):
+            self.mkt_norm = [np.asarray(mk["norm"][0], float), np.asarray(mk["norm"][1], float), float(mk["norm"][2])]
+        self.mkt_slot = int(mk.get("slot", -1))
+        self.mkt_word, self.mkt_prev = int(mk.get("word", -1)), int(mk.get("prev", -1))
+        self.cls_name = {int(k): v for k, v in d.get("cls_name", {}).items()}
         self.curve = list(d.get("curve", []))
         self.n_learned, self.n_read, self.n_scored = (int(x) for x in d.get("n", [0, 0, 0]))
