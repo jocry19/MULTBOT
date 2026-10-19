@@ -331,7 +331,8 @@ risk:
   trail_atr: 1.6
   max_hold_bars: 72             # Zeit-Stop
   stop_liq_frac: 0.60           # Stop liegt spätestens bei 60 % der Distanz zum Liquidationspreis
-  daily_loss_pause_pct: 0.45    # Einstiegs-Pause, wenn Equity in 24 h um 45 % fällt
+  daily_loss_pause_pct: 0.0     # Einstiegs-Pause bei Tagesverlust (Anteil, z. B. 0.45). 0 = aus: Im Modus
+                                # fixed hat die Pause im Walk-Forward mehr Gewinner blockiert als Verluste gespart
   corr_limit: 0.75              # keine zwei hochkorrelierten Positionen in dieselbe Richtung
   max_same_class_side: 3        # max. Positionen je Asset-Klasse und Richtung (z. B. 3× Aktie long)
   min_stop_pct: 0.004           # Stop mindestens 0,4 % entfernt (ruhige Nachtstunden → sonst Rausch-Stops)
@@ -347,14 +348,17 @@ signal:
   min_agreement: 0.55           # gewichteter Anteil der Strategien in Signalrichtung
   min_pwin: 0.53                # Meta-Modell: min. Gewinnwahrscheinlichkeit (sobald trainiert)
   ml_blend: 0.30                # Anteil des ML-Modells am finalen Score
-  horizon: 3                    # Lern-Horizont in Bars (3 × 5m = 15 min)
+  horizon: 12                   # Lern-Horizont in Bars (12 × 5m = 1 h; im Walk-Forward klar besser als 15 min)
   decay_horizons: [1, 2, 3, 6, 12, 24, 48]
   warmup_bars: 150
-  market_gate_ic: 0.0           # Markt-Filter: nur handeln, wo die eigenen Signale nachweislich eine Kante
-                                # haben (gelernter IC ≥ Wert, ab gate_min_obs Beobachtungen; null = aus)
-  regime_gate_ic: 0.0           # dasselbe je Marktphase (Trend/Range × Vola)
+  market_gate_ic: null          # Markt-Filter: nur handeln, wo die eigenen Signale nachweislich eine Kante
+                                # haben (gelernter IC ≥ Wert, ab gate_min_obs Beobachtungen; null = aus).
+                                # Walk-Forward: half auf 5m, schadete auf 15m → standardmäßig aus
+  regime_gate_ic: null          # dasselbe je Marktphase (Trend/Range × Vola)
   gate_min_obs: 150
   funding_hold_hours: 2.0       # erwartete Haltedauer für die Funding-Kosten im Meta-Modell
+  use_lead_lag: false           # Lead-Lag-Features ggü. BTC / XYZ100. Walk-Forward: auf 5m und 15m schlechter
+  disabled_strategies: [leadlag] # Strategien, die nie ins Ensemble gehen (Schlüssel wie im Terminal)
 
 learning:
   hedge_eta: 0.06               # Lernrate der Multiplicative-Weights

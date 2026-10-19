@@ -52,7 +52,7 @@ class RiskCfg:
     trail_atr: float = 1.6
     max_hold_bars: int = 72
     stop_liq_frac: float = 0.60
-    daily_loss_pause_pct: float = 0.45
+    daily_loss_pause_pct: float = 0.0   # 0 = off (walk-forward: the pause cost more than it saved)
     corr_limit: float = 0.75
     max_same_class_side: int = 3
     min_stop_pct: float = 0.004
@@ -71,15 +71,15 @@ class SignalCfg:
     min_agreement: float = 0.55
     min_pwin: float = 0.53
     ml_blend: float = 0.30
-    horizon: int = 3
+    horizon: int = 12                    # 12 × 5m = 1 h (walk-forward: clearly better than 15 min)
     decay_horizons: list = field(default_factory=lambda: [1, 2, 3, 6, 12, 24, 48])
     warmup_bars: int = 150
-    market_gate_ic: float | None = 0.0   # trade a market only if its learned IC ≥ this (None = off)
-    regime_gate_ic: float | None = 0.0   # same per market regime
+    market_gate_ic: float | None = None  # trade a market only if its learned IC ≥ this (None = off)
+    regime_gate_ic: float | None = None  # same per market regime
     gate_min_obs: int = 150              # observations before a gate may block
     funding_hold_hours: float = 2.0      # expected holding time for the funding cost estimate
-    use_lead_lag: bool = True            # lead-lag features vs BTC / XYZ100
-    disabled_strategies: list = field(default_factory=list)
+    use_lead_lag: bool = False           # lead-lag features vs BTC / XYZ100 (walk-forward: hurt on 5m and 15m)
+    disabled_strategies: list = field(default_factory=lambda: ["leadlag"])
 
 
 @dataclass
