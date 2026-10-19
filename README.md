@@ -106,6 +106,12 @@ Beim Start von `run` ist das Terminal sofort da, und der WebSocket läuft ab der
 (600 Kerzen je Markt) lädt der Bot im Hintergrund, nach Priorität: offene Positionen zuerst, dann nach
 24h-Volumen. Jeder Markt wird nach dem Laden einzeln vortrainiert und ist dann „bereit“. Bei 289 Märkten
 dauert das beim ersten Start einige Minuten, danach nur Sekunden, weil die Historie zwischengespeichert wird.
+
+Sobald alle Märkte geladen sind, lernt MULT Q2 die gesamte Historie noch einmal **zeitlich verschränkt** neu:
+alle Märkte gemeinsam, Bar für Bar, wie im Backtest. Bei 289 Märkten dauert das etwa 2 Minuten, der
+Live-Handel läuft dabei weiter. Danach ersetzt dieser Lernstand den Warmstart. Der Grund: Beim Laden Markt
+für Markt hätte ein später geladener Markt schon von der Zukunft der anderen Märkte im selben Zeitraum
+„gelernt“. Meta-Modell, Trefferquoten und erwartete Bewegungen wären dann zu optimistisch.
 Konto, Lernstand und Journal liegen in `data/`. Ein Neustart macht an derselben Stelle weiter.
 
 ## Deine Märkte (config.yaml)
