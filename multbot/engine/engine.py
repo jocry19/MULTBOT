@@ -67,7 +67,7 @@ class Engine:
         self.last_t = 0
         self.journal: deque = deque(maxlen=journal_size)
         self.trades: list[dict] = []
-        self.equity_curve: deque = deque(maxlen=30000)
+        self.equity_curve: deque = deque(maxlen=None if mode == "backtest" else 30000)
         self.hourly_eq: deque = deque(maxlen=48)
         self.returns: dict[str, deque] = {c: deque(maxlen=400) for c in specs}
         self.pending_orders: dict[str, dict] = {}
@@ -241,17 +241,17 @@ class Engine:
         ok, code, reason = self._entry_checks(coin, spec, final, d, pwin, an["regime"], frow, t, an.get("exp_roe"))
         if ok and self.mode == "live" and not self.exec.book_fresh(coin, t):
             # unfocused market: subscribe its order book first, enter as soon as it arrives (retry_entry)
-            self.awaiting_book[coin] = t
+            self.awaiting_book.setdefault(coin, t)
             v.status = "WARTE AUF ORDERBUCH"
             return False
+        self.awaiting_book.pop(coin, None)
         if not ok:
             self._reject(coin, t, code, reason, an)
             return False
-        self.awaiting_book.pop(coin, None)
         la = self.last_analysis.get(coin) or {}
         exp = {"exp_roe": an.get("exp_roe"), "exp_move": an.get("exp_move"), "rank": la.get("rank")}
-        self._enter(coin, spec, 1 if final > 0 else -1, d, pwin, an["meta_x"], an["regime"].label, frow, t, exp)
-        return True
+        return self._enter(coin, spec, 1 if final > 0 else -1, d, pwin, an["meta_x"], an["regime"].label, frow, t,
+                           exp)
 
     def _reject(self, coin: str, t: int, code: str, reason: str, an: dict) -> None:
         final = an["final"]
@@ -313,7 +313,8 @@ class Engine:
         if d["agreement"] < cfg.signal.min_agreement:
             return False, "Strategien uneinig", f"Strategien uneinig ({d['agreement']:.0%} < {cfg.signal.min_agreement:.0%})"
         if r.skip_stale_markets and not regime.tradable:
-            return False, regime.why, regime.why
+            code = "Oracle eingefroren (Börse zu)" if regime.why.startswith("Oracle") else "Markt schläft"
+            return False, code, regime.why
         gate = self._quality_gate(coin, regime.label)
         if gate:
             return False, gate[0], gate[1]
@@ -354,7 +355,8 @@ class Engine:
     def reserved_margin(self) -> float:
         return self.account.used_margin() + sum(p["margin"] for p in self.pending_orders.values())
 
-    def _enter(self, coin, spec, side, d, pwin, meta_x, regime_label, frow, t, exp: dict | None = None) -> None:
+    def _enter(self, coin, spec, side, d, pwin, meta_x, regime_label, frow, t, exp: dict | None = None) -> bool:
+        """Place the maker order or open the position; False if sizing or opening failed."""
         ref = self.last_px.get(coin, frow["close"])
         maker = self.cfg.execution.entry_mode == "maker"
         px = self.exec.maker_price(coin, side, ref, t) if maker else ref
@@ -369,11 +371,12 @@ class Engine:
             code = "Sizing: " + why.split(" (")[0]
             self.reject_reasons[code] = self.reject_reasons.get(code, 0) + 1
             self._log_skip(t, coin, code, f"Sizing verworfen: {why}", {})
-            return
+            return False
         ctx = {"coin": coin, "side": side, "size": order.size, "leverage": order.leverage,
                "stop_dist": order.stop_dist, "margin": order.margin, "d": d, "pwin": pwin, "meta_x": meta_x,
                "regime": regime_label, "atr": frow.get("atr", 0.0), "notes": order.notes,
-               "margin_pct": order.margin_pct, "created": t, "bars": 0, "limit": px, "exp": exp or {}}
+               "margin_pct": order.margin_pct, "created": t, "bars": 0, "limit": px, "exp": exp or {},
+               "placed_ms": max(t, self.last_t), "queue": self.exec.queue_ahead(coin, side, px, t), "traded": 0.0}
         if maker:
             self.pending_orders[coin] = ctx
             self.counters["orders"] += 1
@@ -384,9 +387,9 @@ class Engine:
                                f"({order.leverage}x, Margin {order.margin:.2f} USD) | Score {d['final']:+.2f} | "
                                f"gültig {self.cfg.execution.maker_timeout_bars} Bars",
                                {"limit": px, "size": order.size})
-            return
+            return True
         fill = self.exec.market(coin, side, order.size, ref, t)
-        self._open_position(ctx, fill, t)
+        return self._open_position(ctx, fill, t)
 
     def _cancel(self, coin: str, t: int, why: str) -> None:
         po = self.pending_orders.pop(coin, None)
@@ -397,13 +400,14 @@ class Engine:
         if self.mode != "backtest":
             self.log_event(t, coin, "CANCEL", f"Limit-Order @ {po['limit']:.6g} storniert: {why}")
 
-    def _try_fill_pending(self, coin: str, t: int, lo: float, hi: float, tick_mode: bool) -> bool:
+    def _try_fill_pending(self, coin: str, t: int, lo: float, hi: float, tick_mode: bool,
+                          at_limit_ok: bool = False) -> bool:
         po = self.pending_orders.get(coin)
         if not po:
             return False
         lim, side = po["limit"], po["side"]
         hit = (lo < lim) if side > 0 else (hi > lim)
-        if not hit:
+        if not (hit or at_limit_ok):
             return False
         self.pending_orders.pop(coin)
         m = self.micro.get(coin)
@@ -412,14 +416,23 @@ class Engine:
         self._open_position(po, fill, t)
         return coin in self.account.positions
 
-    def on_trade(self, coin: str, px: float, aggressor: int, t: int) -> None:
-        """Live trade print: a sell aggressor at/below our bid (or buy at/above our ask) fills the limit."""
+    def on_trade(self, coin: str, px: float, aggressor: int, t: int, size: float = 0.0) -> None:
+        """Live trade print after the order was placed. A sell aggressor *below* our bid (buy above our ask)
+        means our level was consumed → filled. Prints exactly at our price only fill once the volume traded
+        there exceeds the queue that was ahead of us plus our own size."""
         po = self.pending_orders.get(coin)
-        if po and aggressor == -po["side"] and po["side"] * (po["limit"] - px) >= 0:
-            self._try_fill_pending(coin, t, px - 1e-12 if po["side"] > 0 else px,
-                                   px + 1e-12 if po["side"] < 0 else px, True)
+        if not po or aggressor != -po["side"] or t < po.get("placed_ms", 0):
+            return
+        through = po["side"] * (po["limit"] - px) > 0
+        if not through and px == po["limit"]:
+            po["traded"] = po.get("traded", 0.0) + size
+            if po["traded"] < po.get("queue", 0.0) + po["size"]:
+                return
+        elif not through:
+            return
+        self._try_fill_pending(coin, t, px, px, True, at_limit_ok=True)
 
-    def _open_position(self, ctx: dict, fill, t: int) -> None:
+    def _open_position(self, ctx: dict, fill, t: int) -> bool:
         coin, side, d, pwin = ctx["coin"], ctx["side"], ctx["d"], ctx["pwin"]
         spec = self.specs[coin]
         meta_x = ctx["meta_x"]
@@ -427,10 +440,14 @@ class Engine:
         notional = fill.px * ctx["size"]
         margin = notional / ctx["leverage"]
         if not self.account.unlimited and margin + fill.fee > self.account.balance:
-            margin = (self.account.balance - fill.fee) * 0.999
-            if margin * ctx["leverage"] < self.cfg.risk.min_notional:
+            scale = (self.account.balance * 0.999) / (margin + fill.fee)   # shrink the order, keep the leverage
+            margin *= scale
+            ctx = {**ctx, "size": ctx["size"] * scale}
+            fill.fee *= scale
+            notional = fill.px * ctx["size"]
+            if notional < self.cfg.risk.min_notional:
                 self.log_event(t, coin, "SKIP", "Eröffnung abgebrochen: Guthaben reicht nicht mehr")
-                return
+                return False
         stop_px = fill.px - side * ctx["stop_dist"]
         tp_px = fill.px + side * self.cfg.risk.tp_r * ctx["stop_dist"]
         reasons = [f"{BY_KEY[k].name if k in BY_KEY else 'ML'} {c:+.3f}" for k, c in d["contrib"][:5]]
@@ -450,7 +467,7 @@ class Engine:
             self.account.open(pos)
         except ValueError as e:
             self.log_event(t, coin, "SKIP", f"Eröffnung fehlgeschlagen: {e}")
-            return
+            return False
         self.counters["entries"] += 1
         lp = pos.liq_price()
         self.views[coin].status = f"{'LONG' if side > 0 else 'SHORT'} {ctx['leverage']}x"
@@ -467,6 +484,7 @@ class Engine:
             {"side": side, "px": fill.px, "size": ctx["size"], "margin": margin, "stop": stop_px, "tp": tp_px,
              "liq": lp, "fill_source": fill.source, "notes": ctx["notes"]},
         )
+        return True
 
     # ── price updates: stops, take profits, liquidations, trailing ────────
     def on_price(self, coin: str, px: float, t: int, hi: float | None = None, lo: float | None = None,
@@ -483,6 +501,10 @@ class Engine:
             return
         s = pos.side
         liq = pos.liq_price()
+        if just_filled and open_px is not None and s * (open_px - pos.stop_px) <= 0:
+            # the bar opened beyond the stop: the resting limit was filled at once and the stop fires at the open
+            self._close(coin, open_px, "Stop (Gap)", t)
+            return
         if open_px is not None and not just_filled:
             if (s > 0 and open_px <= liq) or (s < 0 and open_px >= liq):
                 self._close(coin, open_px, "LIQUIDATION (Gap)", t, liquidation=True)
@@ -496,7 +518,7 @@ class Engine:
         crossed_liq = (s > 0 and adverse <= liq) or (s < 0 and adverse >= liq)
         liq_before_stop = s * (liq - pos.stop_px) > 0   # e.g. funding ate the margin
         if crossed_liq and (tick_mode or liq_before_stop):
-            self._close(coin, liq, "LIQUIDATION", t, liquidation=True)
+            self._close(coin, adverse if tick_mode else liq, "LIQUIDATION", t, liquidation=True)
             return
         if (s > 0 and adverse <= pos.stop_px) or (s < 0 and adverse >= pos.stop_px):
             reason = "Trailing-Stop" if pos.trail_active else "Stop-Loss"
@@ -504,8 +526,11 @@ class Engine:
             return
         if just_filled and not tick_mode:
             return  # intrabar order unknown after a limit fill: no take-profit / trailing in the fill bar
-        if (s > 0 and favorable >= pos.tp_px) or (s < 0 and favorable <= pos.tp_px):
-            if self.cfg.execution.tp_maker:
+        maker_tp = self.cfg.execution.tp_maker
+        # a resting take-profit only fills once the market trades *through* it
+        if (s > 0 and (favorable > pos.tp_px if maker_tp else favorable >= pos.tp_px)) or \
+                (s < 0 and (favorable < pos.tp_px if maker_tp else favorable <= pos.tp_px)):
+            if maker_tp:
                 self._close(coin, pos.tp_px, "Take-Profit", t, maker=True)
             else:
                 self._close(coin, favorable if tick_mode else pos.tp_px, "Take-Profit", t)
@@ -518,8 +543,9 @@ class Engine:
             pos.best_px = favorable
         if pos.r_multiple(pos.best_px) >= self.cfg.risk.trail_after_r:
             new_stop = pos.best_px - s * self.cfg.risk.trail_atr * pos.atr
-            if not pos.trail_active:
-                new_stop = s * max(s * new_stop, s * (pos.entry_px + s * pos.entry_px * 0.0005))  # ≥ break-even
+            if not pos.trail_active:   # first trail: at least break-even *after* fees and exit slippage
+                be = pos.entry_px * (1 + s * self.exec.round_trip_cost(coin, t, pos.size * pos.entry_px))
+                new_stop = s * max(s * new_stop, s * be)
             if s * new_stop > s * pos.stop_px:
                 pos.stop_px = new_stop
                 pos.trail_active = True
@@ -549,7 +575,7 @@ class Engine:
         trade = self.account.close(coin, exit_px, fill.fee, reason, t, liquidation, fill.slippage_bps)
         self.brain.learn_trade(trade.pop("meta_x"), trade["net"] > 0)
         self.trades.append(trade)
-        if len(self.trades) > 5000:
+        if len(self.trades) > 5000 and self.mode != "backtest":
             self.trades = self.trades[-4000:]
         self.counters["exits"] += 1
         if self.store:
@@ -718,9 +744,11 @@ class Engine:
             return
         self.account.load(d.get("account", {}))
         for c in [c for c in self.account.positions if c not in self.specs]:
-            p = self.account.positions.pop(c)
-            self.account.balance += p.margin   # market removed from config: release margin at entry
-            log.warning("Position %s gehört zu keinem konfigurierten Markt mehr – Margin freigegeben", c)
+            p = self.account.positions[c]
+            tr = self.account.close(c, p.entry_px, 0.0, "Markt nicht mehr konfiguriert", p.opened_ms)
+            tr.pop("meta_x", None)
+            self.trades.append(tr)
+            log.warning("Position %s gehört zu keinem konfigurierten Markt mehr – zum Einstiegspreis geschlossen", c)
         self.counters.update(d.get("counters", {}))
         self.paused_until = int(d.get("paused_until", 0))
         self.manual_pause = bool(d.get("manual_pause", False))

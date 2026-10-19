@@ -62,6 +62,7 @@ class BaseRunner:
         self.tasks: list[asyncio.Task] = []
         self.feed_stats = {"ctx": 0, "book": 0, "trades": 0, "bars": 0}
         self.watch: dict[str, float] = {}      # markets open in the dashboard → expiry (wall clock)
+        self.fund_by_hour: dict[str, dict[int, float]] = {}
 
     # ── time ──────────────────────────────────────────────────────────────
     def now(self) -> int:
@@ -209,7 +210,8 @@ class BaseRunner:
                 cur["v"] += float(tr["sz"])
                 cur["n"] += 1
             if self.engine:
-                self.engine.on_trade(coin, float(tr["px"]), 1 if tr.get("side") == "B" else -1, int(tr["time"]))
+                self.engine.on_trade(coin, float(tr["px"]), 1 if tr.get("side") == "B" else -1, int(tr["time"]),
+                                     float(tr.get("sz", 0.0)))
         self.feed_stats["trades"] += len(trades)
 
     def feed_ctx(self, coin: str, ctx: dict, t: int) -> None:
@@ -218,6 +220,10 @@ class BaseRunner:
             return
         m.update_ctx(ctx, t)
         self.feed_stats["ctx"] += 1
+        fh = self.fund_by_hour.setdefault(coin, {})
+        fh[t // HOUR_MS] = m.funding_h          # last predicted rate seen during each hour → paid at its end
+        if len(fh) > 3:
+            del fh[min(fh)]
         if m.mark > 0:
             self.feed_mark(coin, m.mark, t)
 
@@ -234,7 +240,7 @@ class BaseRunner:
         return bool(self.engine) and (self.engine.ready is None or coin in self.engine.ready)
 
     # ── bar closing / features ────────────────────────────────────────────
-    def _finalize(self, coin: str, cur: dict, t: int) -> None:
+    def _finalize(self, coin: str, cur: dict, t: int, gap: bool = False) -> None:
         bar = Bar(cur["t"], cur["o"], cur["h"], cur["l"], cur["c"], cur["v"], cur["n"])
         m = self.micro[coin]
         self.series[coin].upsert(bar)
@@ -245,7 +251,7 @@ class BaseRunner:
             for k in [k for k in fund if k < first]:
                 del fund[k]
         self.feed_stats["bars"] += 1
-        if not self.is_ready(coin):
+        if gap or not self.is_ready(coin):
             return
         frow = self.feature_row(coin, t)
         self.engine.on_bar_close(coin, cur["t"] + self.bar_ms, frow, len(self.series[coin]))
@@ -290,28 +296,42 @@ class BaseRunner:
         between markets so hundreds of bar closes never block WebSocket processing."""
         closed = 0
         for coin in list(self.cur):
-            cur = self.cur[coin]
-            if cur is None:
-                last = self.series[coin].last()
-                if last is None:
-                    continue
-                cur = self.cur[coin] = {"t": last.t + self.bar_ms, "o": last.c, "h": last.c, "l": last.c,
-                                        "c": last.c, "v": 0.0, "n": 0}
-            while t >= cur["t"] + self.bar_ms + grace_ms:
-                self._finalize(coin, cur, t)
-                closed += 1
-                px = cur["c"]
-                cur = self.cur[coin] = {"t": cur["t"] + self.bar_ms, "o": px, "h": px, "l": px, "c": px,
-                                        "v": 0.0, "n": 0}
-                if closed % 12 == 0:
-                    await asyncio.sleep(0)
+            try:
+                cur = self.cur[coin]
+                if cur is None:
+                    last = self.series[coin].last()
+                    if last is None:
+                        continue
+                    cur = self.cur[coin] = {"t": last.t + self.bar_ms, "o": last.c, "h": last.c, "l": last.c,
+                                            "c": last.c, "v": 0.0, "n": 0}
+                n_here = 0
+                while t >= cur["t"] + self.bar_ms + grace_ms:
+                    # after a stall (sleep, blocked loop) only the first overdue bar is real; the rest are
+                    # flat gap-fillers that must not trade, learn or age positions
+                    self._finalize(coin, cur, t, gap=n_here > 0)
+                    n_here += 1
+                    closed += 1
+                    px = cur["c"]
+                    cur = self.cur[coin] = {"t": cur["t"] + self.bar_ms, "o": px, "h": px, "l": px, "c": px,
+                                            "v": 0.0, "n": 0}
+                    if closed % 12 == 0:
+                        await asyncio.sleep(0)
+                        if self.cur[coin] is not cur:   # a tick rolled the bar meanwhile: it is in charge now
+                            break
+            except Exception:  # noqa: BLE001 – one market must never stop the clock for all others
+                log.exception("Bar-Abschluss %s fehlgeschlagen", coin)
         if self.engine and self.engine.entry_queue:
             self.engine.flush_entries(t - grace_ms)   # every market has closed these bars: rank and enter
         hour = t // HOUR_MS
         if self.engine and self.last_hour and hour > self.last_hour:
-            for coin in list(self.engine.account.positions):
-                m = self.micro[coin]
-                self.engine.on_funding(coin, m.funding_h, m.oracle or m.mark, hour * HOUR_MS)
+            for h in range(self.last_hour + 1, hour + 1):          # every missed hour is settled once
+                for coin in list(self.engine.account.positions):
+                    m = self.micro[coin]
+                    rate = self.fund_by_hour.get(coin, {}).get(h - 1, m.funding_h)   # rate of the hour that ended
+                    try:
+                        self.engine.on_funding(coin, rate, m.oracle or m.mark, h * HOUR_MS)
+                    except Exception:  # noqa: BLE001
+                        log.exception("Funding %s fehlgeschlagen", coin)
         self.last_hour = hour
         if self.engine and t - self.last_equity_mark >= 10_000:
             self.last_equity_mark = t
@@ -426,7 +446,10 @@ class LiveRunner(BaseRunner):
 
     def desired_focus(self) -> list[str]:
         e = self.engine
-        limit = max(1, self.cfg.execution.book_focus)
+        # held / pending markets always keep their book; on top of that, room for the best new candidates
+        # (WebSocket limit: 1000 subscriptions, two per market are already used for context and trades)
+        held = len(e.account.positions) + len(e.pending_orders)
+        limit = max(1, min(max(self.cfg.execution.book_focus, held + 20), 1000 - 2 * len(self.specs) - 10))
         now = time.time()
         self.watch = {c: exp for c, exp in self.watch.items() if exp > now}
         pri = list(e.account.positions) + list(e.pending_orders) + list(e.awaiting_book) + list(self.watch)

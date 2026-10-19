@@ -35,7 +35,12 @@ async def calibrate_costs(rest: HLRest, coins: list[str]) -> dict[str, dict]:
             return
         m = MicroState(coin)
         m.update_book(book.get("levels"), int(book.get("time", 0)))
+        if not (m.bids and m.asks) or m.spread_bps() <= 0:
+            log.warning("Orderbuch %s einseitig/leer – Standardkosten statt Kalibrierung", coin)
+            return
         b, a = m.depth_usd(0.02)
+        if min(b, a) <= 0:
+            return
         out[coin] = {"spread_bps": round(m.spread_bps(), 2), "depth_usd": round(b + a, 2),
                      "bid_depth": round(b, 2), "ask_depth": round(a, 2), "mid": m.mid,
                      "imbalance": round(m.imbalance(10), 3), "levels": len(m.bids) + len(m.asks)}
@@ -106,6 +111,7 @@ def build_report(cfg: Config, specs: dict[str, MarketSpec], history: dict[str, H
     ims = INTERVAL_MS[cfg.signal.interval]
     oos_eq = [e for e in res.equity if e[0] >= res.train_end_t]
     oos_trades = [t for t in res.trades if t["entry_ms"] >= res.train_end_t]
+    ref = cfg.reference_capital if cfg.account.fixed else None
     if cfg.account.fixed:
         mc = monte_carlo_additive(oos_trades or res.trades, cfg.reference_capital, cfg.research.mc_paths,
                                   cfg.research.mc_trades)
@@ -122,7 +128,7 @@ def build_report(cfg: Config, specs: dict[str, MarketSpec], history: dict[str, H
                    "max_open_positions": cfg.risk.max_open_positions, "train_frac": cfg.research.train_frac,
                    "leverage": {c: s.leverage for c, s in specs.items()},
                    "taker_fee": {c: s.taker_fee for c, s in specs.items()}},
-        "metrics_oos": equity_metrics(oos_eq, ims), "metrics_all": equity_metrics(res.equity, ims),
+        "metrics_oos": equity_metrics(oos_eq, ims, ref), "metrics_all": equity_metrics(res.equity, ims, ref),
         "trades_oos": trade_metrics(oos_trades), "trades_all": trade_metrics(res.trades),
         "per_asset": per_asset(oos_trades or res.trades), "per_regime": per_regime(oos_trades or res.trades),
         "hourly": hourly_profile(oos_trades or res.trades),

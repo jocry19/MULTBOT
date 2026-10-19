@@ -149,6 +149,7 @@ class HLWebSocket:
         self.connected = False
         self.messages = 0
         self.reconnects = 0
+        self.handler_errors = 0
         self.last_msg_ms = 0
         self._stop = asyncio.Event()
         self._ws = None
@@ -206,9 +207,15 @@ class HLWebSocket:
                             channel = msg.get("channel", "")
                             if channel in ("subscriptionResponse", "pong"):
                                 continue
-                            res = self.on_message(channel, msg.get("data"))
-                            if asyncio.iscoroutine(res):
-                                await res
+                            try:
+                                res = self.on_message(channel, msg.get("data"))
+                                if asyncio.iscoroutine(res):
+                                    await res
+                            except Exception:  # noqa: BLE001 – a handler bug is not a network error
+                                self.handler_errors += 1
+                                if self.handler_errors <= 20 or self.handler_errors % 1000 == 0:
+                                    log.exception("Fehler bei der Verarbeitung von %s (#%d)", channel,
+                                                  self.handler_errors)
                     finally:
                         pinger.cancel()
             except asyncio.CancelledError:

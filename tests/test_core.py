@@ -499,3 +499,133 @@ def test_entries_ranked_by_expected_roe(cfg):
     ok, code, _ = engine._entry_checks(coins[2], specs[coins[2]], 0.6, {"agreement": 1.0}, None,
                                        type("R", (), {"tradable": True, "label": "TREND-HIGH"})(), {}, t, -0.02)
     assert not ok and code == "Erwartung zu klein"
+
+
+# ── regression tests for the MULT Q2 audit fixes ─────────────────────────────
+def _live_engine(cfg, n=1):
+    from multbot.features.micro import MicroState
+    cfg.assets = cfg.assets[:n]
+    specs = offline_specs(cfg)
+    micro = {c: MicroState(c) for c in specs}
+    return Engine(cfg, specs, Brain(cfg, list(specs)), mode="live", micro=micro), specs
+
+
+def _pending(engine, coin, side=1, limit=100.0, size=1.0, placed=1_000, queue=0.0):
+    engine.pending_orders[coin] = {
+        "coin": coin, "side": side, "size": size, "leverage": 10, "stop_dist": 1.0, "margin": 10.0,
+        "d": {"final": 0.5, "ens": 0.5, "p_up": 0.6, "agreement": 1.0, "coverage": 1.0, "contrib": []},
+        "pwin": None, "meta_x": None, "regime": "TREND-HIGH", "atr": 1.0, "notes": [], "margin_pct": 0.1,
+        "created": placed, "bars": 0, "limit": limit, "exp": {}, "placed_ms": placed, "queue": queue, "traded": 0.0}
+
+
+def test_maker_fill_needs_trade_after_placement_through_or_queue(cfg):
+    engine, specs = _live_engine(cfg)
+    coin = list(specs)[0]
+    _pending(engine, coin, queue=5.0)
+    engine.on_trade(coin, 99.0, -1, 500, 10.0)            # printed before the order existed
+    assert coin in engine.pending_orders
+    engine.on_trade(coin, 100.0, -1, 2_000, 3.0)          # at our price, queue ahead not yet consumed
+    assert coin in engine.pending_orders
+    engine.on_trade(coin, 100.0, 1, 2_000, 50.0)          # buyer aggressor cannot fill a resting bid
+    assert coin in engine.pending_orders
+    engine.on_trade(coin, 100.0, -1, 2_500, 3.0)          # 6 traded ≥ 5 ahead + 1 ours → filled
+    assert coin in engine.account.positions
+    engine2, _ = _live_engine(cfg)
+    _pending(engine2, coin, queue=1e9)
+    engine2.on_trade(coin, 99.99, -1, 2_000, 0.01)        # traded through the level → filled regardless
+    assert coin in engine2.account.positions
+
+
+def test_round_trip_cost_includes_market_impact(cfg):
+    specs = offline_specs(cfg)
+    coin = list(specs)[0]
+    thin = ExecutionModel(cfg, specs, calib={coin: {"spread_bps": 5.0, "depth_usd": 4_000.0}})
+    deep = ExecutionModel(cfg, specs, calib={coin: {"spread_bps": 5.0, "depth_usd": 4_000_000.0}})
+    assert thin.round_trip_cost(coin, 0) > deep.round_trip_cost(coin, 0) + 0.002
+    bad = ExecutionModel(cfg, specs, calib={coin: {"spread_bps": 0.0, "depth_usd": 0.0}})
+    fill = bad.market(coin, -1, 1_000.0, 100.0, 0)        # degenerate calibration never gives absurd fills
+    assert fill.px > 90.0
+
+
+def test_tick_through_liquidation_closes_at_tick_price(cfg):
+    engine, specs = _live_engine(cfg)
+    coin = list(specs)[0]
+    p = make_pos(side=1, entry=100.0, lev=10, max_lev=10)
+    p.coin = coin
+    engine.account.open(p)
+    engine.on_price(coin, 80.0, 10_000)                   # one tick far beyond stop and liquidation
+    tr = engine.trades[-1]
+    assert tr["liquidation"] and tr["exit_px"] < 81.0
+
+
+def test_clock_catch_up_never_closes_a_bar_twice(cfg):
+    import asyncio
+    from collections import Counter
+    from multbot.engine.runner import BaseRunner
+    cfg.assets = cfg.assets[:1]
+    specs = offline_specs(cfg)
+    coin = cfg.coins[0]
+    r = BaseRunner(cfg)
+    r._init_state(specs)
+    r.engine = Engine(cfg, specs, r.brain, None, mode="live", micro=r.micro)
+    calls = Counter()
+    r.engine.on_bar_close = lambda c, t, frow, n, **k: calls.update([t])
+    bm = r.bar_ms
+    t0 = 1_700_000_000_000 - 1_700_000_000_000 % bm
+    for i in range(200):
+        r.series[coin].upsert(Bar(t0 + i * bm, 100, 100, 100, 100, 1, 1))
+    last_t = t0 + 199 * bm
+    r.cur[coin] = {"t": last_t + bm, "o": 100, "h": 100, "l": 100, "c": 100, "v": 0, "n": 0}
+    now = last_t + 21 * bm + 2000                          # the loop stalled ~20 bars
+
+    async def main():
+        async def tick():
+            r.feed_mark(coin, 123.0, now)
+        task = asyncio.create_task(tick())
+        await r.clock(now)
+        await task
+
+    asyncio.run(main())
+    assert all(n == 1 for n in calls.values())
+    assert len(calls) <= 2                                 # the real overdue bar (+ the tick's) – no gap-fillers
+    assert r.cur[coin]["c"] == 123.0
+
+
+def test_backtest_pays_funding_every_hour_on_long_bars(cfg):
+    from multbot.research.backtest import run_backtest
+    cfg.assets = cfg.assets[:1]
+    cfg.signal.interval = "4h"
+    specs = offline_specs(cfg)
+    coin = cfg.coins[0]
+    n = 60
+    t = (np.arange(n) * 4 * 3_600_000 + 1_700_006_400_000).astype(np.int64)
+    bars = [Bar(int(t[i]), 100.0, 100.1, 99.9, 100.0, 1.0, 1) for i in range(n)]
+    ft = np.arange(t[0], t[-1] + 4 * 3_600_000, 3_600_000, dtype=np.int64)
+    hist = {coin: History(coin=coin, interval="4h", bars=bars, funding_t=ft, funding_rate=np.full(len(ft), 1e-4),
+                          premium=np.zeros(len(ft)))}
+    engine_box = {}
+    import multbot.research.backtest as bt
+    orig = bt.Engine
+
+    class Spy(orig):
+        def __init__(self, *args, **kw):
+            super().__init__(*args, **kw)
+            engine_box["e"] = self
+            p = make_pos(side=1, entry=100.0, lev=10, max_lev=10)
+            p.coin = coin
+            p.stop_px, p.tp_px, p.init_stop_px = 1e-9, 1e12, 1e-9
+            self.account.open(p)
+    bt.Engine = Spy
+    try:
+        run_backtest(cfg, specs, hist, Brain(cfg, [coin]), trade=False)
+    finally:
+        bt.Engine = orig
+    assert engine_box["e"].counters["funding_events"] >= 4 * (n - 2)
+
+
+def test_fixed_mode_metrics_are_additive():
+    from multbot.research.analytics import equity_metrics
+    eq = [(i * 300_000, v, 1) for i, v in enumerate([1000.0, -200.0, 1500.0, 1400.0])]
+    m = equity_metrics(eq, 300_000, reference=1000.0)
+    assert m["pnl_usd"] == pytest.approx(400.0) and m["max_dd_usd"] == pytest.approx(1200.0)
+    assert m["chained_return"] == pytest.approx(0.4)

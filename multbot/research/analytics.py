@@ -9,13 +9,17 @@ import numpy as np
 YEAR_MS = 365 * 24 * 3600 * 1000
 
 
-def equity_metrics(equity: list, interval_ms: int) -> dict:
-    """equity: list of (t, equity, epoch). Epoch restarts (ruin → new 100 USD) are not counted as returns."""
+def equity_metrics(equity: list, interval_ms: int, reference: float | None = None) -> dict:
+    """equity: list of (t, equity, epoch). Epoch restarts (ruin → new 100 USD) are not counted as returns.
+    With ``reference`` (mode fixed: unlimited capital) returns are PnL changes per reference capital and are
+    added, not chained – equity may go to or below zero there without breaking the statistics."""
     if len(equity) < 3:
         return {}
     t = np.array([e[0] for e in equity], dtype=float)
     eq = np.array([e[1] for e in equity], dtype=float)
     ep = np.array([e[2] for e in equity])
+    if reference:
+        return _additive_metrics(t, eq, interval_ms, float(reference))
     prev = eq[:-1]
     with np.errstate(divide="ignore", invalid="ignore"):
         r = np.where(prev > 0, eq[1:] / prev - 1, 0.0)
@@ -46,6 +50,36 @@ def equity_metrics(equity: list, interval_ms: int) -> dict:
         "time_in_dd": float((dd > 0.001).mean()), "epochs": int(ep.max() - ep.min() + 1),
         "var95_bar": float(np.percentile(r, 5)), "cvar95_bar": float(r[r <= np.percentile(r, 5)].mean())
         if (r <= np.percentile(r, 5)).any() else 0.0,
+    }
+
+
+def _additive_metrics(t: np.ndarray, eq: np.ndarray, interval_ms: int, ref: float) -> dict:
+    pnl = eq - eq[0]
+    r = np.diff(eq) / ref
+    per_year = YEAR_MS / interval_ms
+    mu, sd = r.mean(), r.std()
+    downside = r[r < 0]
+    dsd = math.sqrt((downside ** 2).mean()) if len(downside) else 0.0
+    peak = np.maximum.accumulate(pnl)
+    dd_usd = peak - pnl
+    i_trough = int(dd_usd.argmax())
+    i_peak = int(np.argmax(pnl[: i_trough + 1])) if i_trough else 0
+    span_years = max((t[-1] - t[0]) / YEAR_MS, 1e-9)
+    total = float(pnl[-1] / ref)
+    max_dd = float(dd_usd.max() / ref)
+    ann = total / span_years if span_years > 0.02 else None
+    q5 = np.percentile(r, 5)
+    return {
+        "bars": len(eq), "start_equity": float(eq[0]), "end_equity": float(eq[-1]), "reference": ref,
+        "pnl_usd": float(pnl[-1]), "max_dd_usd": float(dd_usd.max()),
+        "chained_return": total, "annualized": ann,
+        "sharpe": float(mu / sd * math.sqrt(per_year)) if sd > 0 else 0.0,
+        "sortino": float(mu / dsd * math.sqrt(per_year)) if dsd > 0 else 0.0,
+        "vol_ann": float(sd * math.sqrt(per_year)),
+        "max_dd": max_dd, "dd_peak_t": float(t[i_peak]), "dd_trough_t": float(t[i_trough]),
+        "calmar": (ann / max_dd) if ann is not None and max_dd > 0 else None,
+        "time_in_dd": float((dd_usd > 0.001 * ref).mean()), "epochs": 1,
+        "var95_bar": float(q5), "cvar95_bar": float(r[r <= q5].mean()) if (r <= q5).any() else 0.0,
     }
 
 

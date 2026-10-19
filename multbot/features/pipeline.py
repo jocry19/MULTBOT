@@ -156,7 +156,8 @@ def compute_features(a: dict[str, np.ndarray], interval_ms: int, funding_h: np.n
     f["rsi_7"] = ta.rsi(c, 7)
     _, _, hist = ta.macd(c)
     hsd = ta.rolling_std(hist, 100)
-    f["macd_hist_z"] = np.nan_to_num(np.where(hsd > 0, hist / hsd, 0.0))
+    with np.errstate(invalid="ignore", divide="ignore"):
+        f["macd_hist_z"] = np.nan_to_num(np.where(hsd > 0, hist / hsd, 0.0))
     mid, up, lo, sd = ta.bollinger(c, 20, 2.0)
     with np.errstate(invalid="ignore", divide="ignore"):
         f["bb_z"] = np.nan_to_num(np.where(sd > 0, (c - mid) / sd, 0.0))

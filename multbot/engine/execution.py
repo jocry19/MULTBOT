@@ -8,6 +8,9 @@ from ..exchange.meta import MarketSpec
 from ..features.micro import MicroState
 
 
+MAX_IMPACT = 0.05     # a simulated taker fill never moves more than 5 % beyond mid / reference
+
+
 @dataclass
 class Fill:
     px: float
@@ -78,14 +81,12 @@ class ExecutionModel:
             avg = cost / size if size > 0 else ref_px
             mid = m.mid or ref_px
             avg *= (1 + side * extra)
+            avg = min(max(avg, mid * (1 - MAX_IMPACT)), mid * (1 + MAX_IMPACT))
             slip = side * (avg - mid) / mid * 1e4 if mid else 0.0
             return Fill(avg, size, avg * size, avg * size * spec.taker_fee, slip, used, "book", shortfall)
-        # synthetic: half spread + linear impact against calibrated depth
-        cal = self.calib.get(coin, {})
-        half = float(cal.get("spread_bps", self.cfg.execution.synthetic_spread_bps)) / 2 / 1e4
-        depth = max(float(cal.get("depth_usd", 50_000.0)) / 2, 1.0)
-        notional = size * ref_px
-        impact = 0.01 * notional / depth
+        # synthetic: half spread + linear impact against calibrated depth (capped: never an absurd price)
+        half = self.spread_bps(coin, now_ms) / 2 / 1e4
+        impact = self.impact_frac(coin, side, size * ref_px, now_ms)
         avg = ref_px * (1 + side * (half + impact + extra))
         slip = side * (avg - ref_px) / ref_px * 1e4
         return Fill(avg, size, avg * size, avg * size * spec.taker_fee, slip, 0, "synthetic", 0.0)
@@ -98,17 +99,58 @@ class ExecutionModel:
         half = self.spread_bps(coin, now_ms) / 2 / 1e4
         return ref_px * (1 - side * half)
 
+    def queue_ahead(self, coin: str, side: int, px: float, now_ms: int) -> float:
+        """Size already resting at our limit price when we join it (we are last in the queue)."""
+        if not self.book_fresh(coin, now_ms):
+            return 0.0
+        m = self.micro[coin]
+        for lvl_px, sz in (m.bids if side > 0 else m.asks):
+            if lvl_px == px:
+                return float(sz)
+            if side * (lvl_px - px) < 0:
+                break
+        return 0.0
+
     def maker_fill(self, coin: str, side: int, size: float, px: float, mid: float | None = None) -> Fill:
         spec = self.specs[coin]
         mid = mid or px
         slip = side * (px - mid) / mid * 1e4 if mid else 0.0
         return Fill(px, size, px * size, px * size * spec.maker_fee, slip, 0, "maker", 0.0)
 
-    def round_trip_cost(self, coin: str, now_ms: int) -> float:
-        """Approximate round-trip cost as a fraction of notional (fees + spread + extra slippage)."""
+    def impact_frac(self, coin: str, side: int, notional: float, now_ms: int) -> float:
+        """Price impact of a taker order of ``notional`` USD beyond the touch (fraction of price)."""
+        if self.book_fresh(coin, now_ms):
+            m = self.micro[coin]
+            levels = m.asks if side > 0 else m.bids
+            touch = levels[0][0]
+            remaining, cost, size = notional, 0.0, 0.0
+            for px, sz in levels:
+                take = min(sz * px, remaining)
+                cost += take
+                size += take / px
+                remaining -= take
+                if remaining <= 0:
+                    break
+            if size <= 0:
+                return 0.0
+            avg = cost / size
+            frac = side * (avg - touch) / touch
+            if remaining > 0:   # beyond visible depth, as in market()
+                frac += 0.01 * (1 + remaining / max(notional - remaining, 1.0))
+            return min(max(frac, 0.0), MAX_IMPACT)
+        depth = max(float(self.calib.get(coin, {}).get("depth_usd", 50_000.0)) / 2, 1_000.0)
+        return min(0.01 * notional / depth, MAX_IMPACT)
+
+    def round_trip_cost(self, coin: str, now_ms: int, notional: float | None = None) -> float:
+        """Expected round-trip cost as a fraction of notional: fees, spread, impact and extra slippage.
+        Maker mode joins the touch, so the entry is half a spread better than the close and the taker exit
+        pays the other half: the spread cancels, the exit still pays impact."""
         spec = self.specs[coin]
+        if notional is None:
+            notional = self.cfg.account.position_margin_usd * spec.leverage
         spread = self.spread_bps(coin, now_ms) / 1e4
         extra = self.cfg.execution.extra_slippage_bps / 1e4
+        exit_impact = self.impact_frac(coin, -1, notional, now_ms)
         if self.cfg.execution.entry_mode == "maker":
-            return spec.maker_fee + spec.taker_fee + spread / 2 + extra
-        return 2 * spec.taker_fee + spread + 2 * extra
+            return spec.maker_fee + spec.taker_fee + exit_impact + extra
+        return 2 * spec.taker_fee + spread + 2 * extra + exit_impact + self.impact_frac(coin, 1, notional, now_ms)

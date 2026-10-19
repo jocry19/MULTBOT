@@ -77,8 +77,8 @@ def run_backtest(cfg: Config, specs: dict[str, MarketSpec], history: dict[str, H
     n_steps = len(times)
     for step, t in enumerate(times):
         t_close = t + ims
-        crosses_hour = (t_close % HOUR_MS) == 0 or (t // HOUR_MS) != (t_close // HOUR_MS)
-        hour_mark = (t_close // HOUR_MS) * HOUR_MS
+        # every hour boundary in (t, t_close] settles funding once (one per bar at 5m–1h, several at 4h+)
+        hour_marks = range((t // HOUR_MS + 1) * HOUR_MS, t_close + 1, HOUR_MS)
         for coin, d in data.items():
             i = index[coin].get(t)
             if i is None:
@@ -86,7 +86,9 @@ def run_backtest(cfg: Config, specs: dict[str, MarketSpec], history: dict[str, H
             a, f = d["a"], d["f"]
             o, h, l, c = a["o"][i], a["h"][i], a["l"][i], a["c"][i]
             engine.on_price(coin, float(c), t_close, hi=float(h), lo=float(l), open_px=float(o))
-            if crosses_hour and coin in engine.account.positions:
+            for hour_mark in hour_marks:
+                if coin not in engine.account.positions:
+                    break
                 rate = _funding_at(d["hist"], hour_mark)
                 if rate is None:
                     rate = float(f["funding_h"][i])

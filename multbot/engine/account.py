@@ -147,6 +147,7 @@ class Account:
               liquidation: bool = False, exit_slip_bps: float = 0.0) -> dict:
         p = self.positions.pop(coin)
         pnl = p.upnl(exit_px)
+        exit_fee = min(exit_fee, max(p.margin + pnl, 0.0))   # paid out of what is left of the isolated margin
         returned = p.margin + pnl - exit_fee
         if liquidation:
             self.liquidations += 1
