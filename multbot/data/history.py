@@ -54,7 +54,9 @@ async def fetch_history(cfg: Config, rest: HLRest, coin: str, interval: str, n_b
         except json.JSONDecodeError:
             cached = []
     cached = [c for c in cached if int(c["t"]) >= start]
-    fetch_from = int(cached[-2]["t"]) if len(cached) >= 2 else start
+    # the cache only helps if it reaches back to the requested start; otherwise refetch the whole window
+    covers = len(cached) >= 2 and int(cached[0]["t"]) <= start + 2 * step
+    fetch_from = int(cached[-2]["t"]) if covers else start
     fresh = await rest.candles(coin, interval, fetch_from, end)
     merged = {int(c["t"]): c for c in cached}
     merged.update({int(c["t"]): c for c in fresh})
@@ -77,7 +79,8 @@ async def fetch_history(cfg: Config, rest: HLRest, coin: str, interval: str, n_b
             fcached = []
     fstart = start - 72 * HOUR_MS
     fcached = [x for x in fcached if int(x["time"]) >= fstart]
-    ffrom = int(fcached[-1]["time"]) + 1 if fcached else fstart
+    fcovers = bool(fcached) and int(fcached[0]["time"]) <= fstart + 2 * HOUR_MS
+    ffrom = int(fcached[-1]["time"]) + 1 if fcovers else fstart
     try:
         ffresh = await rest.funding_history(coin, ffrom)
     except Exception as e:  # funding is optional for research

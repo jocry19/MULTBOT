@@ -1,8 +1,9 @@
 # MULTBOT – Perpetual Signal Bot mit Paper-Trading
 
 MULTBOT ist ein selbstlernender Signal-Bot für Perpetuals auf **Hyperliquid**. Er funktioniert auch mit den
-HIP-3-Märkten des `xyz`-Dex (Aktien-Perps wie `xyz:GEV`). Er handelt **simuliert** mit **100 USD**
-Startkapital und nutzt **immer den maximalen Hebel** des jeweiligen Marktes. Zur Bedienung gibt es ein
+HIP-3-Märkten des `xyz`-Dex (Aktien-Perps wie `xyz:GEV`). Er handelt **simuliert**, und **jede Position
+hat 100 USD Margin** beim **maximalen Hebel** des jeweiligen Marktes. Es sind höchstens **5 Positionen**
+gleichzeitig offen, das Kapital ist unbegrenzt, und gemessen wird der **PnL in USD**. Zur Bedienung gibt es ein
 Terminal-Dashboard im Bloomberg-Stil.
 
 > ⚠️ **Nur Simulation.** Der Bot liest ausschließlich öffentliche Marktdaten. Er signiert nichts und sendet
@@ -162,7 +163,17 @@ Hyperliquid WS/REST ─► Mark-Preis-Kerzen + Orderbuch + Trades + Funding/OI
 - **Klumpenrisiko:** höchstens 3 Positionen je Asset-Klasse und Richtung, also z. B. nicht sechs
   Tech-Aktien-Longs auf einmal. Zusätzlich sperrt eine Korrelationsgrenze (0,75), die sofort aus der
   geladenen Historie berechnet wird.
-- **Ruin:** Fällt das Equity unter 5 USD, beginnt eine neue *Epoche* mit 100 USD. Der Lernstand bleibt.
+- **Kapitalmodell `fixed` (Standard):**
+  - Jede Position bekommt genau `position_margin_usd` (100 USD) Margin × Maximalhebel. Bei 10x sind das
+    1.000 USD, bei BTC mit 40x 4.000 USD Positionsgröße.
+  - Es sind höchstens 5 Positionen offen. Das Kapital ist unbegrenzt, der Kontostand darf also nie
+    limitieren, und es gibt keinen Ruin.
+  - Gezeigt werden PnL gesamt (realisiert + offen), Ø pro Trade, Ø ROE auf die 100 USD, Trefferquote,
+    Profit-Faktor und Max-Drawdown in USD. Prozentwerte beziehen sich auf 5 × 100 = 500 USD Referenzkapital.
+  - Reicht ein Orderbuch nicht für die volle 100-USD-Position, wird der Trade übersprungen statt verkleinert.
+    So bleibt jede Position vergleichbar.
+- **Kapitalmodell `compounding` (optional):** ein einziges Konto mit Startkapital, das wächst oder schrumpft.
+  Bei Totalverlust beginnt eine neue *Epoche*, der Lernstand bleibt.
 
 ### Lernen
 
@@ -191,7 +202,8 @@ Lern-Horizont (Standard 3 Bars = 15 min) passiert Folgendes:
   - Sharpe, Sortino, Calmar, Max-DD, VaR/CVaR
   - Profit-Faktor, Ø R, Verlustserien
   - Ergebnisse je Markt, je Regime und je Stunde
-- Ein **Monte-Carlo-Bootstrap** der Trade-Renditen liefert P(Ruin), P(Gewinn), Perzentile, einen
+- Ein **Monte-Carlo-Bootstrap** der Trades liefert P(Gewinn), PnL-Perzentile, Max-Drawdown (im Modus `fixed`
+  addiert sich der PnL bei fester Positionsgröße), einen
   Fan-Chart und einen Kelly-Faktor.
 - Marktstruktur: Volatilität, Anteil eingefrorener Bars, Kurtosis, Funding p.a., Korrelationen.
 

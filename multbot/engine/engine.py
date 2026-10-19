@@ -57,7 +57,8 @@ class Engine:
         self.run = run
         self.mode = mode
         self.micro = micro or {}
-        self.account = Account(cfg.account.starting_balance)
+        fixed = cfg.account.fixed
+        self.account = Account(cfg.reference_capital if fixed else cfg.account.starting_balance, unlimited=fixed)
         self.risk = RiskManager(cfg)
         self.exec = ExecutionModel(cfg, specs, self.micro, calib)
         self.views = {c: CoinView(c) for c in specs}
@@ -106,6 +107,8 @@ class Engine:
         final = d["final"]
         cand = (1 if final > 0 else -1) if abs(final) >= 0.5 * cfg.signal.entry_threshold else 0
         cost = self.exec.round_trip_cost(coin, t)
+        if cand:  # funding the position would pay while held (HIP-3 funding can be 0.5 %/8 h)
+            cost += max(0.0, cand * frow.get("funding_h", 0.0)) * cfg.signal.funding_hold_hours
         meta_x = self.brain.meta_vector(d, frow, cand, regime.label) if cand else None
         pwin = self.brain.p_win(meta_x) if meta_x is not None else None
         if learn:
@@ -228,6 +231,20 @@ class Engine:
         self._last_skip[coin] = (code, t)
         self.log_event(t, coin, "SKIP", text, detail)
 
+    def _quality_gate(self, coin: str, regime_label: str) -> tuple[str, str] | None:
+        """Learned filters: skip markets / regimes where the bot's own signal has shown no edge."""
+        sc = self.cfg.signal
+        b = self.brain
+        if sc.market_gate_ic is not None:
+            ic = b.ic_asset.get("final", {}).get(coin)
+            if ic is not None and ic.n >= sc.gate_min_obs and ic.corr < sc.market_gate_ic:
+                return "Markt ohne Kante (IC)", f"eigene Signale hier bisher ohne Kante (IC {ic.corr:+.3f}, n={ic.n})"
+        if sc.regime_gate_ic is not None:
+            ic = b.ic_regime.get("final", {}).get(regime_label)
+            if ic is not None and ic.n >= sc.gate_min_obs and ic.corr < sc.regime_gate_ic:
+                return "Regime ohne Kante (IC)", f"Regime {regime_label} bisher ohne Kante (IC {ic.corr:+.3f})"
+        return None
+
     def candidates(self, limit: int = 40) -> list[str]:
         """Markets with the strongest current signals (for order-book focus)."""
         th = 0.5 * self.cfg.signal.entry_threshold
@@ -246,6 +263,9 @@ class Engine:
             return False, "Strategien uneinig", f"Strategien uneinig ({d['agreement']:.0%} < {cfg.signal.min_agreement:.0%})"
         if r.skip_stale_markets and not regime.tradable:
             return False, regime.why, regime.why
+        gate = self._quality_gate(coin, regime.label)
+        if gate:
+            return False, gate[0], gate[1]
         if pwin is not None and pwin < cfg.signal.min_pwin:
             return False, "Meta-Modell: Kante zu klein", f"Meta-Modell P(Gewinn) {pwin:.1%} < {cfg.signal.min_pwin:.0%}"
         if len(self.account.positions) + len(self.pending_orders) >= r.max_open_positions:
@@ -254,9 +274,9 @@ class Engine:
         if spread > r.max_spread_bps:
             return False, "Spread zu breit", f"Spread zu breit ({spread:.0f} bps)"
         eq = self.equity()
-        if eq <= 0:
+        if not cfg.account.fixed and eq <= 0:
             return False, "kein Equity", "kein Equity"
-        if self.reserved_margin() / eq > r.max_total_margin_pct:
+        if not cfg.account.fixed and self.reserved_margin() / eq > r.max_total_margin_pct:
             return False, "Margin-Auslastung", "Margin-Auslastung zu hoch"
         to_funding_min = (HOUR_MS - t % HOUR_MS) / 60_000
         fund_bps = side * frow.get("funding_h", 0.0) * 1e4
@@ -286,7 +306,7 @@ class Engine:
         free = self.account.balance - sum(p["margin"] for p in self.pending_orders.values())
         order, why = self.risk.size(spec, side, px, frow.get("atr", ref * 0.01), eq, free,
                                     d["final"], pwin, self.exec.spread_bps(coin, t),
-                                    self.exec.depth_usd(coin, side, t))
+                                    self.exec.depth_usd(coin, side, t), vol=frow.get("vol", 0.0))
         if order is None:
             self.views[coin].status = f"GESPERRT: {why}"
             self.counters["rejected"] += 1
@@ -350,7 +370,7 @@ class Engine:
         eq = self.equity()
         notional = fill.px * ctx["size"]
         margin = notional / ctx["leverage"]
-        if margin + fill.fee > self.account.balance:
+        if not self.account.unlimited and margin + fill.fee > self.account.balance:
             margin = (self.account.balance - fill.fee) * 0.999
             if margin * ctx["leverage"] < self.cfg.risk.min_notional:
                 self.log_event(t, coin, "SKIP", "Eröffnung abgebrochen: Guthaben reicht nicht mehr")
@@ -493,6 +513,8 @@ class Engine:
             self._close(coin, self.last_px.get(coin, self.account.positions[coin].entry_px), reason, t)
 
     def _check_ruin(self, t: int) -> None:
+        if self.account.unlimited:
+            return  # fixed mode: capital is unlimited, there is no ruin – only PnL
         eq = self.equity()
         if eq >= self.cfg.account.ruin_threshold:
             return
@@ -520,7 +542,8 @@ class Engine:
         if not self.hourly_eq or t - self.hourly_eq[-1][0] >= HOUR_MS:
             self.hourly_eq.append((t, eq))
         recent = [e for ts, e in self.hourly_eq if t - ts <= 24 * HOUR_MS]
-        if recent and eq < (1 - self.cfg.risk.daily_loss_pause_pct) * max(recent) and t >= self.paused_until:
+        pct = self.cfg.risk.daily_loss_pause_pct
+        if 0 < pct < 1 and recent and eq < (1 - pct) * max(recent) and t >= self.paused_until:
             self.paused_until = t + 6 * HOUR_MS
             self.log_event(t, "", "INFO", f"Tagesverlust-Bremse: Equity {eq:.2f} < "
                            f"{1 - self.cfg.risk.daily_loss_pause_pct:.0%} des 24h-Hochs – 6 h keine neuen Trades")

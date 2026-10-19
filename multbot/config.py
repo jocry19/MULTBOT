@@ -24,14 +24,21 @@ class AssetCfg:
 
 @dataclass
 class AccountCfg:
+    mode: str = "fixed"                 # "fixed": unlimited capital, every position = position_margin_usd
+                                        # "compounding": one account of starting_balance that grows/shrinks
+    position_margin_usd: float = 100.0
     starting_balance: float = 100.0
     restart_on_ruin: bool = True
     ruin_threshold: float = 5.0
 
+    @property
+    def fixed(self) -> bool:
+        return self.mode == "fixed"
+
 
 @dataclass
 class RiskCfg:
-    max_open_positions: int = 6
+    max_open_positions: int = 5
     base_margin_pct: float = 0.12
     min_margin_pct: float = 0.04
     max_margin_pct: float = 0.25
@@ -49,6 +56,8 @@ class RiskCfg:
     corr_limit: float = 0.75
     max_same_class_side: int = 3
     min_stop_pct: float = 0.004
+    stop_vol_mult: float = 0.0     # stop ≥ mult × σ(bar) × √stop_vol_bars × price (0 = off)
+    stop_vol_bars: int = 12        # time scale of the stop (match the signal horizon)
     skip_stale_markets: bool = True
     max_oracle_age_min: float = 20.0
     funding_guard_bps: float = 6.0
@@ -65,6 +74,10 @@ class SignalCfg:
     horizon: int = 3
     decay_horizons: list = field(default_factory=lambda: [1, 2, 3, 6, 12, 24, 48])
     warmup_bars: int = 150
+    market_gate_ic: float | None = 0.0   # trade a market only if its learned IC ≥ this (None = off)
+    regime_gate_ic: float | None = 0.0   # same per market regime
+    gate_min_obs: int = 150              # observations before a gate may block
+    funding_hold_hours: float = 2.0      # expected holding time for the funding cost estimate
 
 
 @dataclass
@@ -137,6 +150,13 @@ class Config:
     data_dir: str = "data"
     api_url: str = "https://api.hyperliquid.xyz"
     ws_url: str = "wss://api.hyperliquid.xyz/ws"
+
+    @property
+    def reference_capital(self) -> float:
+        """Capital base for percentages: n × position margin (fixed) or the starting balance."""
+        if self.account.fixed:
+            return self.account.position_margin_usd * max(1, self.risk.max_open_positions)
+        return self.account.starting_balance
 
     @property
     def coins(self) -> list[str]:

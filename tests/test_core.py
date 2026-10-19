@@ -233,8 +233,9 @@ def test_backtest_end_to_end_accounting(cfg):
     assert res.counters["bars"] > 0
     # all positions are flat at the end → equity == start + Σ net (single epoch)
     if res.account["epoch"] == 1:
-        assert res.account["equity"] == pytest.approx(cfg.account.starting_balance + sum(t["net"] for t in res.trades),
+        assert res.account["equity"] == pytest.approx(res.account["start"] + sum(t["net"] for t in res.trades),
                                                       abs=1e-6)
+        assert res.account["pnl"] == pytest.approx(sum(t["net"] for t in res.trades), abs=1e-6)
     for t in res.trades:
         assert t["leverage"] == specs[t["coin"]].leverage    # always max leverage
 
@@ -340,3 +341,56 @@ def test_barseries_merge_keeps_live_bars():
     s.upsert(Bar(30, 1, 1, 1, 9.0))
     s.merge([Bar(10, 1, 1, 1, 1.0), Bar(20, 1, 1, 1, 2.0), Bar(30, 1, 1, 1, 3.0)])
     assert s.cols["t"] == [10, 20, 30] and s.cols["c"] == [1.0, 2.0, 9.0]
+
+
+def test_fixed_mode_every_position_same_margin(cfg):
+    """Fixed mode: unlimited capital, each position = 100 USD margin at max leverage, max 5 open."""
+    assert cfg.account.fixed and cfg.account.position_margin_usd == 100 and cfg.risk.max_open_positions == 5
+    assert cfg.reference_capital == 500
+    specs = offline_specs(cfg)
+    spec = specs[cfg.coins[0]]
+    order, why = RiskManager(cfg).size(spec, 1, 50.0, 0.2, equity=-1000.0, free_balance=0.0, final=0.9, pwin=0.9,
+                                       spread_bps=5.0, depth_usd=1e7)
+    assert order is not None, why
+    assert order.margin == pytest.approx(100.0, rel=0.02) and order.leverage == spec.leverage
+    acc = Account(500.0, unlimited=True)
+    for i in range(8):                      # far more margin than the reference capital – allowed
+        p = make_pos(notional=1000.0)
+        p.coin = f"C{i}"
+        acc.open(p)
+    assert acc.balance < 0
+
+
+def test_monte_carlo_additive():
+    from multbot.research.montecarlo import monte_carlo_additive
+    trades = [{"net": n} for n in np.random.default_rng(1).normal(2.0, 10.0, 60)]
+    mc = monte_carlo_additive(trades, 500.0, n_paths=400, n_trades=100)
+    assert mc["ok"] and mc["mode"] == "fixed"
+    assert mc["final_pct"]["50"] > 0 and 0 <= mc["p_profit"] <= 1
+
+
+def test_history_cache_refetches_missing_older_range(cfg, tmp_path):
+    """A cache that starts later than the requested window must not hide the older bars."""
+    import asyncio
+    import json as _json
+    from multbot.data import history as hmod
+
+    calls = []
+
+    class FakeRest:
+        async def candles(self, coin, interval, start, end):
+            calls.append(start)
+            step = 300_000
+            return [{"t": t, "o": 1, "h": 1, "l": 1, "c": 1, "v": 0, "n": 0}
+                    for t in range(start - start % step, end - step, step)]
+
+        async def funding_history(self, coin, start, end=None):
+            return []
+
+    now = hmod.now_ms()
+    recent = [{"t": t, "o": 1, "h": 1, "l": 1, "c": 1, "v": 0, "n": 0}
+              for t in range(now - 100 * 300_000, now - 300_000, 300_000)]
+    hmod._cache_file(cfg, "BTC", "5m").write_text(_json.dumps(recent))
+    h = asyncio.run(hmod.fetch_history(cfg, FakeRest(), "BTC", "5m", 1000, with_funding=False))
+    assert calls and calls[0] <= now - 999 * 300_000          # fetched from the requested start
+    assert len(h.bars) >= 990

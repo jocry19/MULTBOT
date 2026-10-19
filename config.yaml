@@ -308,12 +308,16 @@ universe:
   max_markets: 0                # nur die N volumenstärksten handeln (0 = alle)
 
 account:
-  starting_balance: 100.0       # Startkapital in USD
-  restart_on_ruin: true         # bei Totalverlust neue "Epoche" mit 100 USD, Lernen läuft weiter
-  ruin_threshold: 5.0           # unter diesem Equity-Wert gilt das Konto als ruiniert
+  mode: fixed                   # fixed: unbegrenztes Kapital – JEDE Position bekommt genau
+                                #        position_margin_usd Margin × maximalen Hebel, gemessen wird der PnL
+                                # compounding: ein einziges Konto mit starting_balance, das wächst/schrumpft
+  position_margin_usd: 100.0    # Margin pro Position (10x → 1.000 USD, 40x BTC → 4.000 USD Positionsgröße)
+  starting_balance: 100.0       # nur für mode: compounding
+  restart_on_ruin: true         # nur compounding: bei Totalverlust neue "Epoche"
+  ruin_threshold: 5.0
 
 risk:
-  max_open_positions: 6         # bei ~290 Märkten etwas mehr gleichzeitige Positionen
+  max_open_positions: 5         # maximal gleichzeitig offene Positionen
   base_margin_pct: 0.12         # Basis-Margin pro Trade (Anteil am Equity), wird nach Überzeugung skaliert
   min_margin_pct: 0.04
   max_margin_pct: 0.25
@@ -346,6 +350,11 @@ signal:
   horizon: 3                    # Lern-Horizont in Bars (3 × 5m = 15 min)
   decay_horizons: [1, 2, 3, 6, 12, 24, 48]
   warmup_bars: 150
+  market_gate_ic: 0.0           # Markt-Filter: nur handeln, wo die eigenen Signale nachweislich eine Kante
+                                # haben (gelernter IC ≥ Wert, ab gate_min_obs Beobachtungen; null = aus)
+  regime_gate_ic: 0.0           # dasselbe je Marktphase (Trend/Range × Vola)
+  gate_min_obs: 150
+  funding_hold_hours: 2.0       # erwartete Haltedauer für die Funding-Kosten im Meta-Modell
 
 learning:
   hedge_eta: 0.06               # Lernrate der Multiplicative-Weights

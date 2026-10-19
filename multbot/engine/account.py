@@ -88,7 +88,15 @@ class Position:
 
 
 class Account:
-    def __init__(self, starting_balance: float):
+    """Isolated-margin account.
+
+    ``unlimited=True`` (fixed mode): capital is never the constraint – every position gets the same margin,
+    the balance may go negative and results are read as cumulative PnL on top of ``starting_balance``
+    (which then only serves as the reference capital for percentages).
+    """
+
+    def __init__(self, starting_balance: float, unlimited: bool = False):
+        self.unlimited = unlimited
         self.start = float(starting_balance)
         self.balance = float(starting_balance)
         self.positions: dict[str, Position] = {}
@@ -103,6 +111,9 @@ class Account:
         self.wins = 0
         self.peak = float(starting_balance)
         self.max_dd = 0.0
+        self.max_dd_usd = 0.0
+        self.gross_win = 0.0
+        self.gross_loss = 0.0
 
     # ── valuation ─────────────────────────────────────────────────────────
     def equity(self, marks: dict[str, float]) -> float:
@@ -118,6 +129,7 @@ class Account:
         self.peak = max(self.peak, equity)
         dd = 1 - equity / self.peak if self.peak > 0 else 0.0
         self.max_dd = max(self.max_dd, dd)
+        self.max_dd_usd = max(self.max_dd_usd, self.peak - equity)
         return dd
 
     # ── lifecycle ─────────────────────────────────────────────────────────
@@ -125,7 +137,7 @@ class Account:
         if pos.coin in self.positions:
             raise ValueError(f"Position {pos.coin} existiert bereits")
         cost = pos.margin + pos.entry_fee
-        if cost > self.balance + 1e-9:
+        if not self.unlimited and cost > self.balance + 1e-9:
             raise ValueError(f"Zu wenig Guthaben: benötigt {cost:.2f}, frei {self.balance:.2f}")
         self.balance -= cost
         self.fees += pos.entry_fee
@@ -145,6 +157,10 @@ class Account:
         self.realized += net
         self.n_trades += 1
         self.wins += int(net > 0)
+        if net > 0:
+            self.gross_win += net
+        else:
+            self.gross_loss -= net
         return {
             "epoch": self.epoch, "coin": coin, "side": p.side, "size": p.size, "leverage": p.leverage,
             "entry_px": p.entry_px, "exit_px": exit_px, "entry_ms": p.opened_ms, "exit_ms": ms,
@@ -180,8 +196,14 @@ class Account:
 
     def summary(self, marks: dict[str, float]) -> dict:
         eq = self.equity(marks)
+        upnl = self.upnl(marks)
         return {
-            "equity": eq, "balance": self.balance, "upnl": self.upnl(marks), "used_margin": self.used_margin(),
+            "mode": "fixed" if self.unlimited else "compounding", "pnl": eq - self.start,
+            "realized_pnl": self.realized, "max_dd_usd": self.max_dd_usd,
+            "profit_factor": self.gross_win / self.gross_loss if self.gross_loss > 0 else None,
+            "avg_net": self.realized / self.n_trades if self.n_trades else None,
+            "positions": len(self.positions),
+            "equity": eq, "balance": self.balance, "upnl": upnl, "used_margin": self.used_margin(),
             "start": self.start, "return": eq / self.start - 1, "epoch": self.epoch, "epochs": self.epochs[-20:],
             "realized": self.realized, "fees": self.fees, "funding": self.funding,
             "liquidations": self.liquidations, "trades": self.n_trades,
@@ -195,11 +217,12 @@ class Account:
                 "epoch_start_ms": self.epoch_start_ms, "epochs": self.epochs, "realized": self.realized,
                 "fees": self.fees, "funding": self.funding, "liquidations": self.liquidations,
                 "n_trades": self.n_trades, "wins": self.wins, "peak": self.peak, "max_dd": self.max_dd,
+                "max_dd_usd": self.max_dd_usd, "gross_win": self.gross_win, "gross_loss": self.gross_loss,
                 "positions": {c: asdict(p) for c, p in self.positions.items()}}
 
     def load(self, d: dict) -> None:
         for k in ("start", "balance", "epoch", "epoch_start_ms", "epochs", "realized", "fees", "funding",
-                  "liquidations", "n_trades", "wins", "peak", "max_dd"):
+                  "liquidations", "n_trades", "wins", "peak", "max_dd", "max_dd_usd", "gross_win", "gross_loss"):
             if k in d:
                 setattr(self, k, d[k])
         self.positions = {c: Position(**p) for c, p in d.get("positions", {}).items()}

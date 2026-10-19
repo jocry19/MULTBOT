@@ -130,10 +130,24 @@
     mode.className = "badge" + (info.kind === "sim" ? " sim" : info.status && info.status.phase === "error" ? " err" : "");
     if (!S.ready) return;
     const ac = S.account;
-    $("#top-eq").textContent = usd(ac.equity);
     const pnl = ac.equity - ac.start;
-    $("#top-pnl").innerHTML = `<span class="${cls(pnl)}">${sgn(pnl)} (${spct(ac.return)})</span>`;
-    $("#top-epoch").textContent = `#${ac.epoch}`;
+    if (ac.mode === "fixed") {
+      $("#lbl-eq").textContent = "PNL GESAMT";
+      $("#top-eq").innerHTML = `<span class="${cls(pnl)}">${sgn(pnl)} $</span>`;
+      $("#lbl-pnl").textContent = "REAL. / OFFEN";
+      $("#top-pnl").innerHTML = `<span class="${cls(ac.realized)}">${sgn(ac.realized)}</span> / <span class="${cls(ac.upnl)}">${sgn(ac.upnl)}</span>`;
+      $("#lbl-epoch").textContent = "MODUS";
+      const mp = (A.cache.cfg && A.cache.cfg.config.account.position_margin_usd) || 100;
+      const mx = (A.cache.cfg && A.cache.cfg.config.risk.max_open_positions) || 5;
+      $("#top-epoch").textContent = `${mx}×${mp}$`;
+    } else {
+      $("#lbl-eq").textContent = "EQUITY";
+      $("#top-eq").textContent = usd(ac.equity);
+      $("#lbl-pnl").textContent = "PNL";
+      $("#top-pnl").innerHTML = `<span class="${cls(pnl)}">${sgn(pnl)} (${spct(ac.return)})</span>`;
+      $("#lbl-epoch").textContent = "EPOCHE";
+      $("#top-epoch").textContent = `#${ac.epoch}`;
+    }
     $("#top-pos").textContent = `${S.positions.length} / ${(S.orders || []).length} Ord`;
     const b = S.brain || {};
     $("#top-learn").innerHTML = `n=${(b.n_resolved || 0).toLocaleString()} · IC <span class="${cls(b.ic_final)}">${f(b.ic_final, 3)}</span>`;
@@ -228,8 +242,8 @@
   /* ── F1 MONITOR ─────────────────────────────────────────────────────── */
   RENDER.MON = {
     build: () => panel("watch", "Marktübersicht", "WATCH", "c8 h420", { flush: true, right: watchControls() }) +
-      panel("acct", "Konto · 100 USD Papierkonto", "ACCT", "c4 h420") +
-      canvasPanel("eq", "Equity-Kurve", "EQ", "c8 h240") +
+      panel("acct", "Konto · PnL", "ACCT", "c4 h420") +
+      canvasPanel("eq", "PnL-/Equity-Kurve", "EQ", "c8 h240") +
       panel("pos", "Positionen & Orders", "POS", "c4 h240", { flush: true }) +
       panel("hm", "Signal-Heatmap · stärkste Signale (Strategie × Markt)", "HEAT", "c6 h280", { flush: true }) +
       panel("jr", "Entscheidungs-Journal", "JRNL", "c6 h280"),
@@ -243,8 +257,10 @@
         set("watch", watchTable(A.S)); RENDER.MON.update(A.S);
       }));
       set("acct", acctMetrics(S));
-      equityChart(cv("eq"), S.equity, S.account.start);
-      setR("eq", `Start ${usd(S.account.start)} · Peak ${usd(S.account.peak)} · MaxDD ${pct(S.account.max_dd, 1)}`);
+      equityChart(cv("eq"), S.equity, S.account.start, S.account.mode === "fixed");
+      setR("eq", S.account.mode === "fixed"
+        ? `PnL ${sgn(S.account.pnl)} $ · Peak ${sgn(S.account.peak - S.account.start)} $ · Max-Drawdown ${usd(S.account.max_dd_usd)}`
+        : `Start ${usd(S.account.start)} · Peak ${usd(S.account.peak)} · MaxDD ${pct(S.account.max_dd, 1)}`);
       set("pos", positionsTable(S, true));
       const sig = await fetchCached("sigtop", "/api/signals?limit=14", 4000);
       if (sig) { set("hm", heatmap(sig, S, true)); bindRowClicks("#pb-hm"); }
@@ -309,6 +325,25 @@
   function acctMetrics(S) {
     const a = S.account;
     const pnl = a.equity - a.start;
+    if (a.mode === "fixed") {
+      const cf = (A.cache.cfg && A.cache.cfg.config) || { account: { position_margin_usd: 100 }, risk: { max_open_positions: 5 } };
+      const mp = cf.account.position_margin_usd, mx = cf.risk.max_open_positions;
+      return `<div class="metrics">` +
+        metric("PnL gesamt", sgn(pnl) + " $", cls(pnl), "realisiert + offen") +
+        metric("Realisiert", sgn(a.realized) + " $", cls(a.realized), `${a.trades} Trades`) +
+        metric("Offen (uPnL)", sgn(a.upnl) + " $", cls(a.upnl), `${a.positions}/${mx} Positionen`) +
+        metric("Ø pro Trade", sgn(a.avg_net) + " $", cls(a.avg_net), "netto nach Kosten") +
+        metric("Ø ROE/Trade", a.avg_net === null || a.avg_net === undefined ? "-" : spct(a.avg_net / mp, 1), cls(a.avg_net), `auf ${mp} $ Margin`) +
+        metric("Trefferquote", pct(a.win_rate, 1), (a.win_rate || 0) >= 0.5 ? "up" : "") +
+        metric("Profit-Faktor", f(a.profit_factor, 2), (a.profit_factor || 0) > 1 ? "up" : "down") +
+        metric("Max-Drawdown", usd(a.max_dd_usd), a.max_dd_usd > 0 ? "down" : "", "vom PnL-Hoch") +
+        metric("Margin gebunden", usd(a.used_margin, 0), "", `Exposure ${usd(a.exposure, 0)}`) +
+        metric("Gebühren", usd(a.fees, 2), "down") +
+        metric("Funding", usd(-a.funding, 2), cls(-a.funding), a.funding > 0 ? "bezahlt" : "erhalten") +
+        metric("Liquidationen", a.liquidations, a.liquidations ? "down" : "") +
+        `</div><p class="note" style="margin-top:6px">Kapital <b>unbegrenzt</b> · jede Position <b>${mp} USD Margin × maximaler Hebel</b> · max. <b>${mx}</b> gleichzeitig. Prozentwerte beziehen sich auf ${mx} × ${mp} = ${usd(mp * mx, 0)} Referenzkapital.</p>` +
+        (S.paused ? '<p><span class="tag warn">PAUSIERT</span> RESUME &lt;GO&gt; zum Fortsetzen</p>' : "");
+    }
     return `<div class="metrics">` +
       metric("Equity", usd(a.equity), "amber", `Epoche #${a.epoch}`) +
       metric("PnL", sgn(pnl) + " $", cls(pnl), spct(a.return)) +
@@ -326,8 +361,14 @@
       (S.paused ? '<p><span class="tag warn">PAUSIERT</span> RESUME &lt;GO&gt; zum Fortsetzen</p>' : "");
   }
 
-  function equityChart(canvas, eq, start) {
+  function equityChart(canvas, eq, start, asPnl) {
     if (!canvas) return;
+    if (asPnl) {
+      const data = (eq || []).map((e) => [e[0], e[1] - start]);
+      CH.line(canvas, { series: [{ data, color: CH.C.amber, fill: true, label: "PnL", fillBase: 0 }], zero: true,
+        hlines: [{ y: 0, color: CH.C.cyan, label: "0 $", include: true }], yFmt: (v) => (v >= 0 ? "+" : "") + v.toFixed(2), empty: "PnL-Kurve startet mit dem ersten Takt" });
+      return;
+    }
     const data = (eq || []).map((e) => [e[0], e[1]]);
     const vlines = [];
     for (let i = 1; i < (eq || []).length; i++) if (eq[i][2] !== eq[i - 1][2]) vlines.push({ x: eq[i][0], label: "Epoche " + eq[i][2], color: CH.C.down });
@@ -738,16 +779,25 @@
       if (btn) btn.onclick = startResearch;
       if (!rep) return;
       const m = rep.metrics_oos || {}, t = rep.trades_oos || {};
-      set("rmet", `<div class="metrics">${metric("Rendite OOS", spct(m.chained_return), cls(m.chained_return))}${metric("Sharpe", f(m.sharpe, 2), cls(m.sharpe))}${metric("Sortino", f(m.sortino, 2), cls(m.sortino))}` +
+      const fixed = rep.config.mode === "fixed";
+      set("rmet", `<div class="metrics">${fixed ? metric("PnL OOS", sgn(t.net) + " $", cls(t.net), `Ø ${sgn(t.expectancy)} $/Trade`) : ""}${metric("Rendite OOS", spct(m.chained_return), cls(m.chained_return), fixed ? `auf ${usd(rep.config.starting_balance, 0)} Referenz` : "")}${metric("Sharpe", f(m.sharpe, 2), cls(m.sharpe))}${metric("Sortino", f(m.sortino, 2), cls(m.sortino))}` +
         metric("Max DD", pct(m.max_dd, 1), "down") + metric("Epochen", m.epochs ?? "-", m.epochs > 1 ? "down" : "", "Ruin-Neustarts") + metric("Trades", t.n ?? 0) + metric("Treffer", pct(t.win_rate, 1)) +
         metric("Profit-Faktor", f(t.profit_factor, 2), (t.profit_factor || 0) > 1 ? "up" : "down") + metric("Ø R", sgn(t.avg_r), cls(t.avg_r)) + metric("Netto", sgn(t.net) + " $", cls(t.net)) +
         metric("Gebühren", usd(t.fees, 2), "down") + metric("Funding", usd(-(t.funding || 0), 2), cls(-(t.funding || 0))) + metric("Liquidationen", t.liquidations ?? 0, t.liquidations ? "down" : "") +
         metric("Max Verlustserie", t.max_consec_losses ?? "-") + metric("Ø Haltedauer", f(t.avg_bars, 1) + " Bars") + `</div>`);
       const eq = rep.equity || [];
-      CH.line(cv("req"), { series: [{ data: eq.map((e) => [e[0], e[1]]), color: CH.C.amber, fill: true, label: "Equity", fillBase: rep.config.starting_balance }],
+      if (fixed) equityChart(cv("req"), eq, rep.config.starting_balance, true);
+      else CH.line(cv("req"), { series: [{ data: eq.map((e) => [e[0], e[1]]), color: CH.C.amber, fill: true, label: "Equity", fillBase: rep.config.starting_balance }],
         vlines: [{ x: rep.period.train_end, label: "Start OOS", color: CH.C.violet }], hlines: [{ y: rep.config.starting_balance, color: CH.C.cyan, label: "Start", include: true }], yFmt: (v) => v.toFixed(2) });
       const mc = rep.monte_carlo || {};
-      if (mc.ok) {
+      if (mc.ok && mc.mode === "fixed") {
+        CH.fan(cv("mc"), { steps: mc.fan_steps, fan: mc.fan, start: 0 });
+        set("mcs", `<div class="metrics">${metric("P(Gewinn)", pct(mc.p_profit, 1), cls(mc.p_profit - 0.5), `nach ${mc.n_trades} Trades`)}` +
+          metric("Median-PnL", sgn(mc.final_pct["50"]) + " $", cls(mc.final_pct["50"])) + metric("5 % / 95 %", `${sgn(mc.final_pct["5"], 0)} / ${sgn(mc.final_pct["95"], 0)} $`) +
+          metric("Ø Trade", sgn(mc.mean_trade) + " $", cls(mc.mean_trade), "± " + f(mc.std_trade, 2)) + metric("Median-MaxDD", usd(mc.median_max_dd), "down") +
+          metric("95 %-MaxDD", usd(mc.p95_max_dd), "down") + metric("P(−Referenz)", pct(mc.p_ruin, 1), mc.p_ruin > 0.05 ? "down" : "up", `Verlust ≥ ${usd(mc.reference, 0)}`) + `</div>` +
+          `<p class="note">${mc.n_paths} Pfade × ${mc.n_trades} Trades à ${usd(rep.config.position_margin_usd || 100, 0)} Margin, Bootstrap aus ${mc.n_source_trades} OOS-Trades – PnL addiert sich (feste Positionsgröße).</p>`);
+      } else if (mc.ok) {
         CH.fan(cv("mc"), { steps: mc.fan_steps, fan: mc.fan, start: rep.config.starting_balance });
         set("mcs", `<div class="metrics">${metric("P(Ruin)", pct(mc.p_ruin, 1), mc.p_ruin > 0.1 ? "down" : "up", "Equity < 5 %")}${metric("P(Gewinn)", pct(mc.p_profit, 1), cls(mc.p_profit - 0.5))}` +
           metric("P(Verdopplung)", pct(mc.p_double, 1)) + metric("P(Halbierung)", pct(mc.p_halve, 1), "down") + metric("Median Ende", usd(mc.final_pct["50"]), cls(mc.final_pct["50"] - rep.config.starting_balance)) +

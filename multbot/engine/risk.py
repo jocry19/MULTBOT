@@ -42,12 +42,24 @@ class RiskManager:
         return clamp(frac, r.min_margin_pct, r.max_margin_pct)
 
     def size(self, spec: MarketSpec, side: int, px: float, atr: float, equity: float, free_balance: float,
-             final: float, pwin: float | None, spread_bps: float, depth_usd: float) -> tuple[SizedOrder | None, str]:
+             final: float, pwin: float | None, spread_bps: float, depth_usd: float,
+             vol: float = 0.0) -> tuple[SizedOrder | None, str]:
         r = self.cfg.risk
         lev = spec.leverage
         notes: list[str] = []
-        frac = self.margin_fraction(final, pwin)
-        margin = equity * frac
+        fixed = self.cfg.account.fixed
+        if fixed:
+            # every position: the same margin at max leverage, capital is unlimited
+            margin = self.cfg.account.position_margin_usd
+            frac = margin / max(equity, 1e-9)
+            notional = margin * lev
+            cap = r.max_book_participation * depth_usd if depth_usd > 0 else notional
+            if notional > cap:
+                return None, f"Buch zu dünn für {margin:.0f}-USD-Position ({depth_usd:,.0f} USD in ±2 %)"
+            free_balance = float("inf")
+        else:
+            frac = self.margin_fraction(final, pwin)
+            margin = equity * frac
         fee_buf = 1 + lev * spec.taker_fee * 2
         margin = min(margin, free_balance / fee_buf * 0.995)
         notional = margin * lev
@@ -75,6 +87,9 @@ class RiskManager:
         liq_dist = abs(px - lp)
         min_stop = px * max(r.min_stop_pct, 2.5 * spread_bps / 1e4)
         stop_dist = max(r.stop_atr * atr, min_stop)
+        if r.stop_vol_mult > 0 and vol > 0:
+            # noise of the time scale the signal actually predicts (σ per bar × √bars)
+            stop_dist = max(stop_dist, r.stop_vol_mult * vol * (r.stop_vol_bars ** 0.5) * px)
         max_stop = r.stop_liq_frac * liq_dist
         if stop_dist > max_stop:
             if min_stop > max_stop:

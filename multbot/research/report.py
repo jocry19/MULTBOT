@@ -18,7 +18,7 @@ from ..strategies.library import catalog
 from ..util import DAY_MS, INTERVAL_MS, fmt_ts, now_ms
 from .analytics import equity_metrics, hourly_profile, per_asset, per_regime, trade_metrics
 from .backtest import BacktestResult, prepare_features, run_backtest
-from .montecarlo import monte_carlo
+from .montecarlo import monte_carlo, monte_carlo_additive
 
 log = logging.getLogger("multbot.research")
 
@@ -106,14 +106,20 @@ def build_report(cfg: Config, specs: dict[str, MarketSpec], history: dict[str, H
     ims = INTERVAL_MS[cfg.signal.interval]
     oos_eq = [e for e in res.equity if e[0] >= res.train_end_t]
     oos_trades = [t for t in res.trades if t["entry_ms"] >= res.train_end_t]
-    mc = monte_carlo(oos_trades or res.trades, cfg.account.starting_balance, cfg.research.mc_paths,
-                     cfg.research.mc_trades)
+    if cfg.account.fixed:
+        mc = monte_carlo_additive(oos_trades or res.trades, cfg.reference_capital, cfg.research.mc_paths,
+                                  cfg.research.mc_trades)
+    else:
+        mc = monte_carlo(oos_trades or res.trades, cfg.account.starting_balance, cfg.research.mc_paths,
+                         cfg.research.mc_trades)
     step = max(1, len(res.equity) // 2000)
     return {
         "label": label, "generated": now_ms(), "interval": cfg.signal.interval,
         "period": {"start": res.start_t, "end": res.end_t, "train_end": res.train_end_t, "bars": res.bars,
                    "elapsed_s": round(res.elapsed_s, 1)},
-        "config": {"starting_balance": cfg.account.starting_balance, "train_frac": cfg.research.train_frac,
+        "config": {"starting_balance": cfg.reference_capital, "mode": cfg.account.mode,
+                   "position_margin_usd": cfg.account.position_margin_usd,
+                   "max_open_positions": cfg.risk.max_open_positions, "train_frac": cfg.research.train_frac,
                    "leverage": {c: s.leverage for c, s in specs.items()},
                    "taker_fee": {c: s.taker_fee for c, s in specs.items()}},
         "metrics_oos": equity_metrics(oos_eq, ims), "metrics_all": equity_metrics(res.equity, ims),
@@ -190,6 +196,12 @@ def print_summary(rep: dict) -> None:
           f"{p['elapsed_s']}s)")
     print(f"Lernphase  bis {fmt_ts(p['train_end'])} (nur lernen), danach out-of-sample handeln")
     m, tr = rep.get("metrics_oos") or {}, rep.get("trades_oos") or {}
+    cf = rep.get("config", {})
+    if cf.get("mode") == "fixed" and tr.get("n"):
+        print(f"\nModus      jede Position {cf.get('position_margin_usd', 100):.0f} USD Margin × max. Hebel, "
+              f"max. {cf.get('max_open_positions')} offen, Kapital unbegrenzt")
+        print(f"OOS-PnL    {tr['net']:+.2f} USD  (Ø {tr['expectancy']:+.2f} USD/Trade, "
+              f"{tr['net'] / max(cf.get('starting_balance', 500), 1) * 100:+.1f}% auf {cf.get('starting_balance', 500):.0f} USD Referenz)")
     print(f"\nOOS        Rendite {pct(m.get('chained_return'))}  Sharpe {m.get('sharpe', 0):.2f}  "
           f"Sortino {m.get('sortino', 0):.2f}  MaxDD {pct(m.get('max_dd'))}  Epochen {m.get('epochs', 1)}")
     if tr.get("n"):
@@ -201,9 +213,15 @@ def print_summary(rep: dict) -> None:
     mc = rep.get("monte_carlo", {})
     if mc.get("ok"):
         fp = mc["final_pct"]
-        print(f"\nMonte Carlo ({mc['n_paths']} Pfade × {mc['n_trades']} Trades): P(Ruin) {mc['p_ruin'] * 100:.1f}%  "
-              f"P(Gewinn) {mc['p_profit'] * 100:.1f}%  Median-Ende {fp['50']:.2f} USD  [5%: {fp['5']:.2f} | "
-              f"95%: {fp['95']:.2f}]")
+        if mc.get("mode") == "fixed":
+            fp = mc["final_pct"]
+            print(f"\nMonte Carlo ({mc['n_paths']} Pfade × {mc['n_trades']} Trades à 100 USD): P(Gewinn) "
+                  f"{mc['p_profit'] * 100:.1f}%  Median-PnL {fp['50']:+.2f} USD  [5%: {fp['5']:+.2f} | 95%: "
+                  f"{fp['95']:+.2f}]  Median-MaxDD {mc['median_max_dd']:.2f} USD")
+        else:
+            print(f"\nMonte Carlo ({mc['n_paths']} Pfade × {mc['n_trades']} Trades): P(Ruin) {mc['p_ruin'] * 100:.1f}%  "
+                  f"P(Gewinn) {mc['p_profit'] * 100:.1f}%  Median-Ende {fp['50']:.2f} USD  [5%: {fp['5']:.2f} | "
+                  f"95%: {fp['95']:.2f}]")
     else:
         print(f"\nMonte Carlo: {mc.get('reason')}")
     print("\nPro Markt (OOS):")
