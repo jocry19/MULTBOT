@@ -38,7 +38,7 @@ FINAL = "final"
 
 
 class Brain:
-    VERSION = 3
+    VERSION = 4   # 4: learning horizon 12 bars, lead-lag features
 
     def __init__(self, cfg: Config, coins: list[str]):
         self.cfg = cfg
