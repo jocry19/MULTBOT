@@ -628,7 +628,8 @@
       panel("ica", "IC je Markt", "ASSET", "c6 h300", { flush: true }) +
       canvasPanel("calml", "Kalibrierung ML P(↑)", "CAL", "c4 h260") +
       canvasPanel("calmeta", "Kalibrierung Meta P(Gewinn)", "CAL", "c4 h260") +
-      canvasPanel("metaimp", "Meta-Modell · was macht Trades profitabel?", "META", "c4 h260"),
+      canvasPanel("metaimp", "Meta-Modell · was macht Trades profitabel?", "META", "c4 h260") +
+      panel("move", "Erwartete Bewegung · gelernt je Signalstärke × Volatilität (Basis des Rankings)", "RANK", "c12", { flush: true }),
     async update() {
       const b = await fetchCached("brain", "/api/brain", 5000);
       if (!b || !b.ready) return;
@@ -661,8 +662,22 @@
       calChart(cv("calml"), b.cal_ml);
       calChart(cv("calmeta"), b.cal_meta);
       CH.bars(cv("metaimp"), { items: (b.meta_importance || []).slice(0, 14).map((r) => ({ label: r.feature, value: r.weight })), labelW: 110, fmt: (v) => v.toFixed(3) });
+      set("move", moveTable(b));
     },
   };
+
+  function moveTable(b) {
+    const mt = b.move_table;
+    if (!mt) return '<p class="dim">-</p>';
+    const fe = [0].concat(mt.f_edges), se = [0].concat(mt.s_edges);
+    const lab = (e, i, fmt) => (i + 1 < e.length ? `${fmt(e[i])}–${fmt(e[i + 1])}` : `≥ ${fmt(e[i])}`);
+    const head = se.map((_, j) => `<th>σ(H) ${lab(se, j, (v) => (v * 100).toFixed(2) + "%")}</th>`).join("");
+    const rows = mt.cells.map((row, i) => `<tr><td class="l">|Score| ${lab(fe, i, (v) => v.toFixed(2))}</td>` +
+      row.map((c) => `<td style="${c.n ? heat(c.m * 1e3, 1) : ""}" title="n = ${c.n}">${c.n ? `${(c.m * 1e4).toFixed(1)} bps <span class="dim">n=${c.n.toLocaleString()}</span>` : "-"}</td>`).join("") + `</tr>`);
+    return `<table class="t"><thead><tr><th class="l">Signal</th>${head}</tr></thead><tbody>${rows.join("")}</tbody></table>` +
+      `<p class="note" style="padding:4px 8px">Was Kandidaten mit dieser Signalstärke und Volatilität über ${b.horizon} Bars <b>tatsächlich</b> in Signalrichtung gelaufen sind (Ø ${isNum(b.move_mean) ? (b.move_mean * 1e4).toFixed(1) : "-"} bps, n = ${(b.move_n || 0).toLocaleString()}). ` +
+      `Daraus wird für jeden Kandidaten die erwartete Rendite auf die Margin: <b>E[ROE] = Hebel × (erwartete Bewegung − Kosten)</b>. Die Kandidaten jeder Bar werden danach gerankt.</p>`;
+  }
 
   function strategyTable(b) {
     const rows = (b.strategies || []).slice().sort((x, y) => (y.ic || 0) - (x.ic || 0));
