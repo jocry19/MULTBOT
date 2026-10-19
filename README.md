@@ -285,30 +285,41 @@ Die Werte sind PnL-Differenzen der gesamten Strategie im jeweiligen Fenster, mit
 > Der Bot lernt live weiter (Gewichte, ML- und Meta-Modell, IC je Markt). Ob daraus eine echte Kante wird,
 > zeigen erst Wochen Papierhandel. Verfolgen kannst du das im Terminal unter BRAIN und RESEARCH.
 
-**Unbegrenzte Positionen mit Ranking im selben Test** (PnL in USD, Validierung / Holdout):
+**Unbegrenzte Positionen mit Ranking im selben Test** (PnL in USD, Validierung / Holdout, in Klammern Trades):
 
 | Variante | 5m (14 Tage) | 15m (52 Tage) |
 |---|---|---|
-| max. 5 offen, ohne Ranking (vorher) | +61 / +45 | −113 / −33 |
-| max. 5 offen, gerankt, E[ROE] ≥ 0 | +54 / −37 | +3 / +130 |
-| unbegrenzt, gerankt, ohne Mindestwert | −97 / −136 | +23 / −86 |
-| **unbegrenzt, gerankt, E[ROE] ≥ 0 (Standard)** | −118 / −317 | +18 / +76 |
-| unbegrenzt, gerankt, E[ROE] ≥ +0,5 % | −33 / −201 | −24 / −86 |
+| max. 5 offen, ohne Ranking (vorher) | +61 / +45 (285 / 249) | −113 / −33 (254 / 166) |
+| unbegrenzt, gerankt, ohne Mindestwert | −89 / −170 (438 / 345) | +25 / −136 (337 / 201) |
+| **unbegrenzt, gerankt, E[ROE] ≥ 0 (Standard)** | −88 / −263 (132 / 190) | +21 / −39 (28 / 43) |
+
+Max-Drawdown mit Standardwerten: 226 / 461 USD auf 5m und 72 / 115 USD auf 15m. Ohne Mindestwert waren es
+287 / 553 und 745 / 276 USD.
+
+Ebenfalls getestet und nicht besser: Ranking mit Limit 5, E[ROE] ≥ −0,5 % bzw. ≥ +0,5 %, höchstens 3 neue
+Positionen je Bar, Limit 10.
 
 > **Ehrlich:**
 >
 > - **Das erste Modell war falsch herum.** Die erwartete Bewegung als „Signalstärke × Volatilität“ zu
 >   schätzen, war die naheliegende Idee. Die Trades mit der höchsten Erwartung verloren aber am meisten
 >   (oberste 20 %: Ø −2,41 USD je Trade). Die stärksten Signale und die volatilsten Märkte laufen
->   anschließend eher zurück.
-> - **Deshalb eine Tabelle.** Das Ranking nutzt jetzt eine gelernte Tabelle. Sie bildet das ab und sortiert
->   im Holdout in die richtige Richtung.
-> - **Mehr Positionen sind nicht automatisch mehr Gewinn.** Ohne Limit nimmt der Bot mehr Trades von
->   ähnlicher Qualität, und die Kosten wachsen mit.
-> - **Die Mindesterwartung wirkt nicht stabil.** E[ROE] ≥ 0 hilft auf 15m in beiden Fenstern, schadet aber
->   auf 5m. Dort bleiben vor allem günstige `xyz`-Märkte übrig, die im Backtest schlecht liefen.
-> - **Fazit:** Alle Unterschiede liegen innerhalb der statistischen Schwankung. Wer lieber das Limit will:
->   `risk.max_open_positions: 5` setzen. Ranking und Mindesterwartung bleiben dabei aktiv.
+>   anschließend eher zurück. Das Ranking nutzt deshalb jetzt eine gelernte Tabelle. Sie bildet das ab und
+>   sortiert im Holdout in die richtige Richtung.
+> - **Mehr Positionen sind nicht mehr Gewinn.** Ohne Limit nimmt der Bot mehr Trades von ähnlicher oder
+>   schlechterer Qualität, und die Kosten wachsen mit. Im Test lag das alte Limit von 5 insgesamt etwa
+>   330 USD vorn.
+> - **Was die Mindesterwartung bringt:** E[ROE] ≥ 0 erfüllt das Ziel „keine unnötigen schlechteren
+>   Positionen“ nur teilweise. Der Bot nimmt 60–90 % weniger Trades mit kleinerem Drawdown. Im Mittel
+>   gewinnt er pro Trade aber nicht mehr. Die Signale geben schlicht zu wenig her, um gute von schlechten
+>   Trades zuverlässig zu trennen.
+> - **Wieder zum Limit:** `risk.max_open_positions: 5` setzen. Ranking und Mindesterwartung bleiben dabei
+>   aktiv.
+> - **Gefundener Fehler:** Das Live-Vortraining lernt Markt für Markt. Ein später gelernter Markt profitierte
+>   dadurch schon von dem, was das Modell auf anderen Märkten im selben Zeitraum gesehen hatte. Die gelernte
+>   Bewegung war deshalb etwa zehnfach überschätzt. Die Tabelle lernt jetzt nur aus sauberen Live-Daten und
+>   startet mit vorsichtigen 2,5 bps je Stunde. Die Backtests waren nicht betroffen, sie laufen zeitlich
+>   verschränkt.
 
 ---
 

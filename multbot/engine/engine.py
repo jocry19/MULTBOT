@@ -320,8 +320,8 @@ class Engine:
         if pwin is not None and pwin < cfg.signal.min_pwin:
             return False, "Meta-Modell: Kante zu klein", f"Meta-Modell P(Gewinn) {pwin:.1%} < {cfg.signal.min_pwin:.0%}"
         if exp_roe is not None and cfg.signal.min_exp_roe is not None and exp_roe < cfg.signal.min_exp_roe:
-            return False, "Erwartung zu klein", (f"erwartete Rendite {exp_roe:+.1%} auf die Margin nach Kosten "
-                                                 f"< {cfg.signal.min_exp_roe:+.1%}")
+            return False, "Erwartung zu klein", (f"erwartete Rendite {exp_roe:+.2%} auf die Margin nach Kosten "
+                                                 f"< {cfg.signal.min_exp_roe:+.2%}")
         if r.max_open_positions and len(self.account.positions) + len(self.pending_orders) >= r.max_open_positions:
             return False, "max. Positionen", f"max. {r.max_open_positions} Positionen offen"
         spread = self.exec.spread_bps(coin, t)
@@ -456,7 +456,7 @@ class Engine:
         self.views[coin].status = f"{'LONG' if side > 0 else 'SHORT'} {ctx['leverage']}x"
         pw = f"{pwin:.0%}" if pwin is not None else "n/a"
         exp = ctx.get("exp") or {}
-        er = f"E[ROE] {exp['exp_roe']:+.1%}" if exp.get("exp_roe") is not None else "E[ROE] lernt noch"
+        er = f"E[ROE] {exp['exp_roe']:+.2%}" if exp.get("exp_roe") is not None else "E[ROE] lernt noch"
         rk = f" · Rang {exp['rank'][0]}/{exp['rank'][1]}" if exp.get("rank") else ""
         self.log_event(
             t, coin, "ENTRY",

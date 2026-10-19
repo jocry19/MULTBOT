@@ -314,7 +314,7 @@
         `<td>${kusd(a.vol)}</td><td>${kusd(a.oi)}</td><td>${f(a.spread, 1)}</td>` +
         `<td class="l">${esc(a.regime || "-")}${a.tradable === false ? ' <span class="tag warn">ZU</span>' : ""}</td>` +
         `<td>${sbar(a.final)} <span class="${cls(a.final)}">${sgn(a.final)}</span></td><td>${pct(a.p_up, 0)}</td><td>${a.pwin === null || a.pwin === undefined ? "-" : pct(a.pwin, 0)}</td>` +
-        `<td class="${cls(a.eroe)}">${isNum(a.eroe) ? spct(a.eroe, 1) : "-"}</td>` +
+        `<td class="${cls(a.eroe)}">${isNum(a.eroe) ? spct(a.eroe, 2) : "-"}</td>` +
         `<td class="l ${stc}" title="${esc(st)}">${esc(st.slice(0, 34))}</td></tr>`;
     });
     const h = (k, label, l) => `<th class="${l ? "l" : ""}" data-sort="${k}" style="cursor:pointer">${label}${A.wsort.key === k ? (A.wsort.dir < 0 ? " ▼" : " ▲") : ""}</th>`;
@@ -394,7 +394,7 @@
         (compact ? "" : `<td>${pct(stopD, 2)}</td><td class="${cls(p.r)}">${sgn(p.r)}R</td><td>${pct(p.mae, 2)} / ${pct(p.mfe, 2)}</td><td class="${cls(-p.funding)}">${f(-p.funding, 4)}</td><td>${dur(p.age_min)}</td>`) + `</tr>`;
     });
     const orows = O.map((o) => `<tr><td class="l cyan">${esc(o.coin.replace("xyz:", ""))}</td><td class="l"><span class="tag info">LIMIT ${o.side > 0 ? "BUY" : "SELL"}</span> ${o.leverage}x</td>` +
-      `<td>${px(o.limit)}</td><td colspan="${compact ? 5 : 13}" class="l dim">Größe ${o.size} · Margin ${usd(o.margin)} · ${o.bars} Bar(s) alt · ${esc(o.regime)}${o.exp && isNum(o.exp.exp_roe) ? ` · E[ROE] ${spct(o.exp.exp_roe, 1)}` + (o.exp.rank ? ` (Rang ${o.exp.rank[0]}/${o.exp.rank[1]})` : "") : ""}</td></tr>`);
+      `<td>${px(o.limit)}</td><td colspan="${compact ? 5 : 13}" class="l dim">Größe ${o.size} · Margin ${usd(o.margin)} · ${o.bars} Bar(s) alt · ${esc(o.regime)}${o.exp && isNum(o.exp.exp_roe) ? ` · E[ROE] ${spct(o.exp.exp_roe, 2)}` + (o.exp.rank ? ` (Rang ${o.exp.rank[0]}/${o.exp.rank[1]})` : "") : ""}</td></tr>`);
     return `<table class="t"><thead><tr><th class="l">Markt</th><th class="l">Seite</th><th>Einstieg</th><th>Mark</th><th>uPnL</th><th>ROE</th>` +
       (compact ? "" : "<th>Notional</th><th>Margin</th><th>Stop</th><th>TP</th>") + `<th>Liq-Preis</th><th>Abst. Liq</th>` +
       (compact ? "" : "<th>Abst. Stop</th><th>R</th><th>MAE / MFE</th><th>Funding</th><th>Alter</th>") + `</tr></thead><tbody>${rows.join("")}${orows.join("")}</tbody></table>`;
@@ -547,7 +547,7 @@
     return `<table class="t"><thead><tr><th class="l">Strategie</th><th class="l">Familie</th><th>Score</th><th></th><th>Gewicht</th><th>Beitrag</th><th class="l">Begründung</th></tr></thead><tbody>` +
       rows.map((r) => `<tr><td class="l amber">${esc(stratName(r.k))}</td><td class="l dim">${esc(fam(r.k))}</td><td class="${cls(r.s)}">${sgn(r.s)}</td><td>${sbar(r.s, 70)}</td>` +
         `<td><span class="mbar" style="width:${Math.min(60, r.w * 300)}px"></span> ${pct(r.w, 1)}</td><td class="${cls(r.s * r.w)}">${sgn(r.s * r.w, 3)}</td><td class="l dim">${esc(r.why)}</td></tr>`).join("") +
-      `</tbody></table><div class="note" style="padding:4px 8px">Ensemble ${sgn(v.ens)} · ML P(↑) ${pct(v.p_up, 1)} · FINAL <b class="${cls(v.final)}">${sgn(v.final)}</b> · Einigkeit ${pct(v.agreement, 0)} · Abdeckung ${pct(v.coverage, 0)} · P(Gewinn) ${v.pwin === null || v.pwin === undefined ? "Meta-Modell lernt noch" : pct(v.pwin, 1)} · E[ROE] ${isNum(v.exp_roe) ? `<b class="${cls(v.exp_roe)}">${spct(v.exp_roe, 1)}</b> auf die Margin (${v.leverage}x)` : "-"}</div>`;
+      `</tbody></table><div class="note" style="padding:4px 8px">Ensemble ${sgn(v.ens)} · ML P(↑) ${pct(v.p_up, 1)} · FINAL <b class="${cls(v.final)}">${sgn(v.final)}</b> · Einigkeit ${pct(v.agreement, 0)} · Abdeckung ${pct(v.coverage, 0)} · P(Gewinn) ${v.pwin === null || v.pwin === undefined ? "Meta-Modell lernt noch" : pct(v.pwin, 1)} · E[ROE] ${isNum(v.exp_roe) ? `<b class="${cls(v.exp_roe)}">${spct(v.exp_roe, 2)}</b> auf die Margin (${v.leverage}x)` : "-"}</div>`;
   }
 
   function featHtml(d) {
@@ -884,7 +884,7 @@
         ["Größe", t.size], ["Margin", usd(t.margin)], ["PnL brutto", sgn(t.pnl)], ["Gebühren", f(t.fees, 4)], ["Funding", f(-t.funding, 4)], ["Netto", `<b class="${cls(t.net)}">${sgn(t.net)}</b> (${spct(t.roe, 1)} ROE)`],
         ["R-Multiple", sgn(t.r_multiple)], ["MAE / MFE", `${pct(t.mae, 2)} / ${pct(t.mfe, 2)}`], ["Regime", esc(t.regime)], ["Score", sgn(t.score)], ["P(Gewinn)", t.pwin === null ? "-" : pct(t.pwin, 1)],
         ["Init-Stop / TP", `${px(d.init_stop)} / ${px(d.tp)}`], ["ATR", px(d.atr)], ["Ensemble / P(↑)", `${sgn(dec.ens)} / ${pct(dec.p_up, 1)}`], ["Einigkeit", pct(dec.agreement, 0)],
-        ["Erwartet (E[ROE])", isNum(dec.exp_roe) ? `${spct(dec.exp_roe, 1)} auf die Margin · Bewegung ${spct(dec.exp_move, 3)}` + (dec.rank ? ` · Rang ${dec.rank[0]}/${dec.rank[1]}` : "") : "-"],
+        ["Erwartet (E[ROE])", isNum(dec.exp_roe) ? `${spct(dec.exp_roe, 2)} auf die Margin · Bewegung ${spct(dec.exp_move, 3)}` + (dec.rank ? ` · Rang ${dec.rank[0]}/${dec.rank[1]}` : "") : "-"],
         ["Margin-Anteil", pct(dec.margin_pct, 1)], ["Ausführung", esc(dec.fill || "-")]].map(([k, v]) => `<tr><td class="l dim">${k}</td><td>${v}</td></tr>`).join("")}</tbody></table>` +
       `<p class="amber" style="margin:8px 0 2px">Beiträge zur Entscheidung</p>` + ((dec.contrib || []).map(([k, c]) => `<div>${sbar(c * 4, 70)} <span class="${cls(c)}">${sgn(c, 3)}</span> ${esc(stratName(k))}</div>`).join("") || '<span class="dim">-</span>') +
       ((dec.notes || []).length ? `<p class="note">${dec.notes.map(esc).join(" · ")}</p>` : ""));
