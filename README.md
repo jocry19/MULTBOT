@@ -221,6 +221,55 @@ Lern-Horizont (Standard 12 Bars = 1 h) passiert Folgendes:
 > - Live sperrt der Bot neue Einstiege, wenn sich das Oracle seit 20 Minuten nicht bewegt hat, die Börse
 >   des Basiswerts also geschlossen ist. Den Grund schreibt er ins Journal.
 
+### Profitabilität: was der Walk-Forward-Test zeigt
+
+Die Standardwerte in `config.yaml` sind nicht geschätzt. Sie wurden per Walk-Forward mit unberührtem
+Holdout ausgewählt, und zwar mit genau dem Modell, das live läuft: 100 USD Margin × Maximalhebel je
+Position, höchstens 5 offen, Maker-Einstiege, echtes Funding, Spreads aus den aktuellen Orderbüchern.
+
+- **Daten:** die 60 liquidesten Märkte (33 Krypto, 18 Aktien, 4 Rohstoffe, 3 ETFs, 2 Indizes).
+  - 5m-Kerzen über 14 Tage (5.–19. Okt. 2026)
+  - 15m-Kerzen über 52 Tage (28. Aug.–19. Okt. 2026)
+- **Ablauf:**
+  - 0–40 % der Zeit wird nur gelernt.
+  - 40–70 % ist die **Validierung**. Nur danach wird ausgewählt.
+  - 70–100 % ist der **Holdout**. Er wird nur berichtet.
+- **Regel:** Eine Änderung wird nur übernommen, wenn sie in Validierung *und* Holdout hilft und auf der
+  anderen Datenbasis nicht schadet.
+
+| Änderung | Validierung | Holdout | Entscheidung |
+|---|---|---|---|
+| Lern-Horizont 1 h statt 15 min | +300 USD | +120 USD | **übernommen** (`horizon: 12`) |
+| Tages-Verlustpause aus | ±0 | +81 USD | **übernommen** (`daily_loss_pause_pct: 0`) |
+| Lead-Lag ggü. BTC / XYZ100 | −236 USD | −205 USD | aus (auf 15m ebenfalls schlechter) |
+| Markt-/Regime-Gates (IC ≥ 0) | −60 USD | −147 USD | aus (auf 15m ebenfalls schlechter) |
+| P(Gewinn) ≥ 0,55 / 0,56 | −98 / −130 USD | −18 / −225 USD | bleibt 0,53 |
+| Take-Profit 3R statt 2,2R | −22 USD | −77 USD | bleibt 2,2R |
+| kein Ausstieg bei Signalumkehr | −27 USD | ±0 | Ausstieg bleibt (auf 15m klar schlechter) |
+| reiner Zeit-Ausstieg, Einstiegsschwelle 0,20, Vola-Stops | gemischt | gemischt | nicht übernommen |
+| 15m- statt 5m-Takt | – | – | 5m bleibt (15m über 52 Tage: −113 / −33 USD) |
+
+Die Werte sind PnL-Differenzen der gesamten Strategie im jeweiligen Fenster, mit je etwa 200–300 Trades.
+
+**Ergebnis mit den neuen Standardwerten (5m):**
+
+- Validierung: **+61 USD** aus 285 Trades (Profit-Faktor 1,06, Ø +0,21 USD je Trade)
+- Holdout: **+45 USD** aus 249 Trades (Profit-Faktor 1,04, Ø +0,18 USD je Trade)
+- Die alten Standardwerte lagen im selben Test bei −213 USD bzw. −22 USD.
+
+> **Ehrlich:** Das ist eine klare Verbesserung, aber **kein Beweis für einen profitablen Bot**.
+>
+> - Der Standardfehler liegt bei ±150–170 USD je Fenster. Die Ergebnisse sind statistisch also nicht von
+>   null zu unterscheiden.
+> - Über die längere 15m-Historie bleibt das Ergebnis leicht negativ.
+> - Hauptgegner sind die **Gebühren**. Bei 100 USD Margin und 10–40x Hebel kostet jeder Trade
+>   ungefähr so viel, wie die Signale im Mittel brutto verdienen. In der Einzeltrade-Analyse lagen die
+>   Trades brutto bei +224 USD, davon gingen 198 USD an Gebühren und 13 USD an Funding.
+> - Die meisten Verluste entstehen durch Stops in den ersten 30 Minuten nach dem Einstieg.
+>
+> Der Bot lernt live weiter (Gewichte, ML- und Meta-Modell, IC je Markt). Ob daraus eine echte Kante wird,
+> zeigen erst Wochen Papierhandel. Verfolgen kannst du das im Terminal unter BRAIN und RESEARCH.
+
 ---
 
 ## Terminal (Dashboard)
