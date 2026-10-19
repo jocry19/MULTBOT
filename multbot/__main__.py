@@ -24,7 +24,7 @@ BANNER = r"""
  __  __ _   _ _   _____ ____   ___ _____
 |  \/  | | | | | |_   _| __ ) / _ \_   _|   Perpetual Signal Bot · Paper-Trading
 | |\/| | | | | |   | | |  _ \| | | || |     Hyperliquid (inkl. HIP-3 xyz) · max. Hebel
-| |  | | |_| | |___| | | |_) | |_| || |     Startkapital 100 USD · selbstlernend
+| |  | | |_| | |___| | | |_) | |_| || |     @CAPITAL@ · selbstlernend
 |_|  |_|\___/|_____|_| |____/ \___/ |_|     NUR SIMULATION – keine echten Orders
 """
 
@@ -127,7 +127,10 @@ def cmd_run(args, sim: bool = False) -> None:
             webbrowser.open(url)
         return
     runner = SimRunner(cfg, speed=args.speed, seed=args.seed, markets=args.markets) if sim else LiveRunner(cfg)
-    print(BANNER)
+    acc = cfg.account
+    capital = (f"{acc.position_margin_usd:g} USD je Position · max. {cfg.risk.max_open_positions} offen"
+               if acc.fixed else f"Startkapital {acc.starting_balance:g} USD")
+    print(BANNER.replace("@CAPITAL@", capital))
     if args.no_web:
         asyncio.run(_headless(runner))
     else:

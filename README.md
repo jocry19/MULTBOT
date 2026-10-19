@@ -178,7 +178,7 @@ Hyperliquid WS/REST ─► Mark-Preis-Kerzen + Orderbuch + Trades + Funding/OI
 ### Lernen
 
 Der Bot bewertet jede Strategie auf jedem Markt in jedem Takt, nicht nur bei echten Trades. Nach dem
-Lern-Horizont (Standard 3 Bars = 15 min) passiert Folgendes:
+Lern-Horizont (Standard 12 Bars = 1 h) passiert Folgendes:
 
 1. **Hedge / Multiplicative Weights** in drei Ebenen (global, je Regime, je Markt) mit Vergessensfaktor.
    Daraus entsteht das Ensemble.

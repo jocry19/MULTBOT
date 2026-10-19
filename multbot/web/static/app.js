@@ -195,7 +195,7 @@
       if (confirm(c ? `Position ${c} schließen?` : "ALLE Positionen schließen?")) control("flatten", c);
       return;
     }
-    if (head === "RESET") { if (confirm("Konto auf Startkapital zurücksetzen (neue Epoche)? Lernstand bleibt.")) control("reset"); return; }
+    if (head === "RESET") { if (confirm("Konto zurücksetzen (PnL auf 0, neue Epoche)? Lernstand bleibt.")) control("reset"); return; }
     if (head === "RUN" && rest[0] && rest[0].startsWith("RES")) { go("RES"); startResearch(); return; }
     if (page) {
       if (page === "ASSET" && rest[0]) { const c = findCoin(rest[0]); if (c) A.coin = c; }
@@ -903,7 +903,7 @@
       if (!$("#ctl-pause")) {
         set("ctl", `<div class="row" style="margin-bottom:8px"><button class="btn" id="ctl-pause">⏸ Pause</button><button class="btn green" id="ctl-resume">▶ Fortsetzen</button></div>` +
           `<div class="row" style="margin-bottom:8px"><button class="btn red" id="ctl-flat">Alle Positionen schließen</button><button class="btn red" id="ctl-reset">Konto-Reset (neue Epoche)</button></div>` +
-          `<p class="note">Alles ist <b>Simulation</b>. Reset setzt das Papierkonto auf das Startkapital zurück – der gesamte Lernstand (Gewichte, Modelle, Statistiken) bleibt erhalten.</p>`);
+          `<p class="note">Alles ist <b>Simulation</b>. Reset setzt das Papierkonto zurück (PnL auf 0, neue Epoche) – der gesamte Lernstand (Gewichte, Modelle, Statistiken) bleibt erhalten.</p>`);
         $("#ctl-pause").onclick = () => control("pause");
         $("#ctl-resume").onclick = () => control("resume");
         $("#ctl-flat").onclick = () => confirm("Alle Positionen schließen?") && control("flatten");
