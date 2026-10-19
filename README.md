@@ -1,12 +1,37 @@
-# MULTBOT – Perpetual Signal Bot mit Paper-Trading
+# MULT Q2 – Perpetual Signal Bot mit Paper-Trading
 
-MULTBOT ist ein selbstlernender Signal-Bot für Perpetuals auf **Hyperliquid**. Er funktioniert auch mit den
+MULT Q2 (Version 2.0, Nachfolger von MULTBOT) ist ein selbstlernender Signal-Bot für Perpetuals auf **Hyperliquid**. Er funktioniert auch mit den
 HIP-3-Märkten des `xyz`-Dex (Aktien-Perps wie `xyz:GEV`). Er handelt **simuliert**, und **jede Position
 hat 100 USD Margin** beim **maximalen Hebel** des jeweiligen Marktes. Das Kapital ist unbegrenzt, es dürfen
 **beliebig viele Positionen** offen sein, und gemessen wird der **PnL in USD**. Damit der Bot dabei keine
 unnötigen schlechteren Trades nimmt, rankt er die Kandidaten jeder Bar über alle Märkte nach **erwarteter
 Rendite auf die Margin** (erwartete Bewegung × Hebel − Kosten × Hebel) und nimmt nur Trades, die nach Kosten
 im Plus erwartet werden. Zur Bedienung gibt es ein Terminal-Dashboard im Bloomberg-Stil.
+
+## Neu in MULT Q2
+
+- **Alpha-Labor (F11, `python -m multbot lab`).** Das Labor prüft rund 90 vorab festgelegte Strategie-Hypothesen
+  auf ≈ 208 Tagen Stunden-Historie der liquidesten Märkte:
+  - Momentum, Reversion, Querschnitt, Residual-Reversion, Funding-Carry, Prämie, Effekte bei Aktien-Perps und
+    der Markt-Trend als Referenz.
+  - Jede Hypothese wird nach echten Kosten (Gebühren, Markteinfluss, Funding) in zwei Zeithälften gerechnet,
+    einmal als reines Signal und einmal als echter Bot-Trade mit Maximalhebel und Stop vor der Liquidation.
+  - Das Labor sagt ehrlich, wie viele Treffer allein durch Zufall zu erwarten wären.
+- **Realistischere Simulation** nach einem vollständigen Code-Audit mit 13 behobenen Fehlern:
+  - Maker-Orders füllen live nur noch durch Trades *nach* der Platzierung, die durch das Limit gehen, oder
+    wenn das Volumen am Limit die Warteschlange davor plus die eigene Größe übersteigt.
+  - Die Kostenschätzung enthält den Markteinfluss. Vorher wurden dünne Orderbücher im Ranking bevorzugt.
+  - Take-Profit muss durchgehandelt werden. Der Break-even-Stop deckt die Gebühren.
+  - Kein doppelter Bar-Abschluss nach Standby. Funding wird pro Stunde mit dem Satz der abgelaufenen Stunde
+    verrechnet. Ein Fehler in einem Markt stoppt nicht mehr den ganzen Takt.
+  - Backtests schneiden keine Trades mehr ab. Kennzahlen im Modus `fixed` sind additiv in USD.
+- **Schneller:** Das Lernmodul ist vektorisiert (numpy). Backtests und der Live-Betrieb mit 289 Märkten
+  brauchen ≈ 30 % weniger CPU.
+- **Komfort:**
+  - Version im Terminal
+  - CSV-Export aller Trades (BLOTTER)
+  - Übernahme von Konto und Positionen aus dem alten MULTBOT-Ordner
+  - neue Launcher `MULT-Q2.bat` / `MULT-Q2.command`
 
 > ⚠️ **Nur Simulation.** Der Bot liest ausschließlich öffentliche Marktdaten. Er signiert nichts und sendet
 > keine echten Orders. Das ist keine Anlageberatung. Perps mit hohem Hebel auf dünnen Märkten können in Minuten
@@ -20,8 +45,8 @@ Du brauchst keine Kommandozeile und musst vorher auch kein Python installieren:
 
 | System | Starten |
 |---|---|
-| **Windows** | `MULTBOT.bat` doppelklicken |
-| **macOS** | `MULTBOT.command` doppelklicken (beim ersten Mal: Rechtsklick → Öffnen) |
+| **Windows** | `MULT-Q2.bat` doppelklicken |
+| **macOS** | `MULT-Q2.command` doppelklicken (beim ersten Mal: Rechtsklick → Öffnen) |
 | **Linux** | `./start.sh` |
 
 Beim ersten Start richtet sich alles selbst ein (1–3 Minuten, Internet nötig):
@@ -30,7 +55,10 @@ Beim ersten Start richtet sich alles selbst ein (1–3 Minuten, Internet nötig)
   [uv](https://docs.astral.sh/uv/), das offizielle Tool von Astral. Dafür sind keine Admin-Rechte nötig,
   die Installation gilt nur für deinen Benutzer.
 - Das Skript legt eine eigene Umgebung (`.venv`) an und installiert die Pakete.
-- Auf dem Desktop erscheint ein **„MULTBOT“-Icon**. Damit startest du künftig.
+- Auf dem Desktop erscheint ein **„MULT Q2“-Icon**. Damit startest du künftig.
+- **Update von MULTBOT:** Den neuen Ordner neben den alten `MULTBOT`-Ordner legen. Beim ersten Start übernimmt
+  MULT Q2 automatisch Konto, offene Positionen und Trades aus `../MULTBOT/data` (der alte Ordner bleibt
+  unverändert). Das alte „MULTBOT“-Icon auf dem Desktop kannst du danach löschen.
 
 Danach öffnet sich das Terminal als **eigenes App-Fenster** ohne Tabs und Adressleiste, sofern Chrome, Edge
 oder Brave installiert ist. Sonst öffnet es sich im Standardbrowser. Das schwarze Konsolenfenster zeigt das Log.
@@ -45,17 +73,17 @@ doppelklicken.
 
 **Noch bequemer:**
 
-- **Desktop-Verknüpfung mit Icon:** `python -m multbot shortcut` legt „MULTBOT“ auf den Desktop. Unter
+- **Desktop-Verknüpfung mit Icon:** `python -m multbot shortcut` legt „MULT Q2“ auf den Desktop. Unter
   Windows ist das eine `.lnk`, unter macOS eine `.command`-Datei und unter Linux ein `.desktop`-Eintrag im
   Anwendungsmenü. Mit `shortcut --sim` entsteht eine Verknüpfung für die Simulation.
 - **Als App installieren:** Im laufenden Terminal erscheint in Chrome oder Edge oben rechts der Knopf
-  **⤓ APP** (alternativ über das Install-Symbol in der Adressleiste). Danach steht MULTBOT im
+  **⤓ APP** (alternativ über das Install-Symbol in der Adressleiste). Danach steht MULT Q2 im
   Startmenü bzw. Dock und öffnet sich wie ein eigenes Programm. Der Bot selbst muss dafür laufen.
-- **Auf dem Handy:** Starte mit `MULTBOT.bat run --lan` (oder `./start.sh run --lan`). Das Log zeigt dann
+- **Auf dem Handy:** Starte mit `MULT-Q2.bat run --lan` (oder `./start.sh run --lan`). Das Log zeigt dann
   eine Adresse wie `http://192.168.x.x:8050`. Öffne sie auf dem Handy im selben WLAN und lege sie über
   „Zum Startbildschirm hinzufügen“ ab. Achtung: Im WLAN kann dann jeder das Terminal öffnen und die
   Steuerung (Pause, Flat, Reset) benutzen. Es ist nur Papiergeld, aber nutze das trotzdem nur im eigenen Netz.
-- **Simulation statt Live:** `MULTBOT.bat sim` bzw. `./start.sh sim`.
+- **Simulation statt Live:** `MULT-Q2.bat sim` bzw. `./start.sh sim`.
 
 ## Schnellstart (Kommandozeile)
 
@@ -69,6 +97,7 @@ python -m multbot shortcut     # Desktop-Verknüpfung anlegen
 python -m multbot research     # Walk-Forward-Backtest auf den 40 volumenstärksten Märkten
 python -m multbot research --top 0              # … auf allen Märkten (dauert beim ersten Mal lange)
 python -m multbot research --coins BTC,ETH,xyz:TSLA
+python -m multbot lab          # Alpha-Labor: alle Signal-Familien nach Kosten (≈208 Tage Stunden-Historie)
 python -m multbot sim --open --markets 30       # Offline-Simulation (synthetischer Markt im Zeitraffer)
 python -m multbot report       # Kontoübersicht aus der Datenbank
 ```
@@ -326,7 +355,7 @@ Positionen je Bar, Limit 10.
 ## Terminal (Dashboard)
 
 Bedienung über die Kommandozeile oben rechts, im Bloomberg-Stil: `GEV <GO>`, `LRN`, `RES` und so weiter.
-Die Seiten erreichst du auch über F1–F10.
+Die Seiten erreichst du auch über F1–F11.
 
 | Taste | Seite | Inhalt |
 |---|---|---|
@@ -340,6 +369,7 @@ Die Seiten erreichst du auch über F1–F10.
 | F8 | JOURNAL | Jede Entscheidung (Entry, Exit, Order, Cancel, Skip, Funding, Ruin) mit Filter und Suche |
 | F9 | SYSTEM | Feed-Status, Steuerung (Pause, Fortsetzen, Flat, Reset), Markt-Spezifikationen, Kosten-Kalibrierung, Konfiguration |
 | F10 | HILFE | Kommandos und Methodik |
+| F11 | ALPHA-LABOR | alle Signal-Familien nach echten Kosten in zwei Zeithälften; reines Signal und echter Maximalhebel-Trade; ehrlicher Zufalls-Vergleich (`LAB <GO>`) |
 
 Kommandos: `PAUSE`, `RESUME`, `FLAT [GEV]`, `RESET`, `RUN RES`, `<MARKT> <GO>`.
 

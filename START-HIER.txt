@@ -1,4 +1,4 @@
-MULTBOT - Perpetual Signal Bot (Paper-Trading, maximaler Hebel)
+MULT Q2 - Perpetual Signal Bot (Paper-Trading, maximaler Hebel)
 ===============================================================
 
 KAPITAL: unbegrenzt. Jede Position bekommt 100 USD Margin x Maximalhebel
@@ -9,29 +9,33 @@ nach Kosten im Plus erwartet werden.
 Gemessen wird der PnL in USD (realisiert + offen) - kein Kontostand, der
 limitiert, kein Totalverlust. Einstellbar in config.yaml unter "account".
 
+UPDATE VON MULTBOT: Diesen Ordner neben den alten MULTBOT-Ordner legen.
+Beim ersten Start uebernimmt MULT Q2 automatisch Konto, offene Positionen
+und Trades von dort (der alte Ordner bleibt unveraendert).
+
 SO STARTEST DU DEN BOT
 ----------------------
-Windows:  Doppelklick auf  MULTBOT.bat
+Windows:  Doppelklick auf  MULT-Q2.bat
           (Kommt "Der Computer wurde durch Windows geschuetzt": "Weitere
           Informationen" -> "Trotzdem ausfuehren".)
-macOS:    Rechtsklick auf  MULTBOT.command  -> "Oeffnen" (nur beim ersten Mal,
+macOS:    Rechtsklick auf  MULT-Q2.command  -> "Oeffnen" (nur beim ersten Mal,
           danach reicht ein Doppelklick)
 Linux:    ./start.sh
 
 Beim ersten Start richtet sich alles selbst ein (1-3 Minuten, Internet noetig):
 - Ist kein Python 3.10+ vorhanden, wird es automatisch installiert
   (ueber das offizielle Tool "uv", ohne Admin-Rechte).
-- Auf dem Desktop erscheint ein Icon "MULTBOT" - damit startest du kuenftig.
+- Auf dem Desktop erscheint ein Icon "MULT Q2" - damit startest du kuenftig.
 
-Danach oeffnet sich das MULTBOT-Terminal als eigenes App-Fenster.
+Danach oeffnet sich das MULT-Q2-Terminal als eigenes App-Fenster.
 Das schwarze Konsolenfenster zeigt das Protokoll - schliessen = Bot beenden.
 
-Simulation statt Live:   MULTBOT.bat sim   bzw.  ./start.sh sim
-Auf dem Handy (WLAN):    MULTBOT.bat run --lan  -> Adresse aus dem Protokoll
+Simulation statt Live:   MULT-Q2.bat sim   bzw.  ./start.sh sim
+Auf dem Handy (WLAN):    MULT-Q2.bat run --lan  -> Adresse aus dem Protokoll
                          im Handy-Browser oeffnen
 
 Bedienung im Terminal: Kommandozeile oben rechts, z.B. "GEV <GO>", "LRN", "RES",
-oder die Tasten F1-F10. "HELP" zeigt alle Kommandos.
+oder die Tasten F1-F11 (F11 = Alpha-Labor). "HELP" zeigt alle Kommandos.
 
 WICHTIG: Reine Simulation. Es werden keine echten Orders gesendet und kein
 Geld bewegt. Keine Anlageberatung.
