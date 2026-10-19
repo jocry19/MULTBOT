@@ -210,6 +210,25 @@ def test_features_are_causal():
         assert f_full[k][cut - 1] == pytest.approx(f_short[k][cut - 1], rel=1e-9, abs=1e-12), k
 
 
+def test_lead_lag_features_are_causal():
+    """Lead-lag features use only the leader's past closes; the follower lags the leader by one bar."""
+    from multbot.features.pipeline import align_leader
+    lead = _synthetic_arrays(900, seed=5)
+    a = _synthetic_arrays(900, seed=6)
+    a["c"] = np.r_[100.0, 100 * lead["c"][:-1] / lead["c"][0]]          # follows the leader one bar late
+    lead_c = align_leader(a["t"], lead["t"], lead["c"])
+    assert np.allclose(lead_c, lead["c"])
+    cut = 700
+    f_full = compute_features(a, 300_000, lead=lead_c)
+    f_short = compute_features({k: v[:cut] for k, v in a.items()}, 300_000, lead=lead_c[:cut])
+    for k in ("lead_ret_1", "lead_ret_3", "lead_beta", "lag_gap"):
+        assert np.all(np.isfinite(f_full[k])), k
+        assert f_full[k][cut - 1] == pytest.approx(f_short[k][cut - 1], rel=1e-9, abs=1e-12), k
+    nxt = np.log(a["c"][2:] / a["c"][1:-1])                              # next bar's return of the follower
+    assert np.corrcoef(f_full["lead_ret_1"][1:-1][300:], nxt[300:])[0, 1] > 0.9
+    assert f_full["lead_beta"][-1] == pytest.approx(0.0, abs=0.2)        # same-bar beta ≈ 0 for a pure lag
+
+
 def test_strategy_scores_bounded():
     a = _synthetic_arrays(600, drift=-0.001)
     f = compute_features(a, 300_000)
