@@ -224,6 +224,43 @@ Hyperliquid WS/REST ─► Mark-Preis-Kerzen + Orderbuch + Trades + Funding/OI
 - **Kapitalmodell `compounding` (optional):** ein einziges Konto mit Startkapital, das wächst oder schrumpft.
   Bei Totalverlust beginnt eine neue *Epoche*, der Lernstand bleibt.
 
+### Marktsprache (`signal.mode: language`, Seite F12)
+
+Statt fester Strategien liest der Bot den Markt wie eine Sprache, die er live lernt.
+
+- **Alphabet:** Jede abgeschlossene Kerze jedes Markts wird zu einem *Wort* aus drei Buchstaben. Jeder
+  Buchstabe wird am eigenen, jüngsten Verhalten dieses Markts gemessen; es gibt keine festen Preis- oder
+  Indikator-Schwellen.
+  - Bewegung (5 Stufen): ⇊ stark fallend · ↓ fallend · · seitwärts · ↑ steigend · ⇈ stark steigend, jeweils
+    in Einheiten der eigenen Volatilität
+  - Volumen (3 Stufen): ◦ leise · • normal · ● laut, gemessen am eigenen jüngsten Volumen
+  - Spanne (3 Stufen): ▁ eng · ▄ normal · █ weit, Hoch–Tief der Kerze gemessen an der Volatilität
+  - Das ergibt 45 Wörter, z. B. `↑●█` = steigend, laut, weite Spanne.
+- **Stimmung:** Dazu kommt die Stimmung des *ganzen* Markts in der letzten abgeschlossenen Kerze: wie viele
+  Märkte gestiegen sind (Risk-off / gemischt / Risk-on) und wie hektisch es war (ruhig / normal / hektisch).
+- **Grammatik:** Für jede Phrase merkt sich der Bot, was danach im Mittel passierte, gemessen als Bewegung über
+  den Lern-Horizont in Volatilitäts-Einheiten. Es gibt fünf Arten von Phrasen:
+  - das letzte Wort
+  - die letzten zwei Wörter, jeweils mit Stimmung
+  - die letzten drei Wörter
+  - den „Dialekt“ jedes einzelnen Markts
+  - die Stimmung allein
+  Das funktioniert wie die Wortvorhersage einer Handy-Tastatur.
+- **Vergessen:** Alte Belege verblassen exponentiell. Hört eine Phrase auf zu funktionieren, verschwindet ihr
+  Einfluss. Spricht der Markt anders, lernt der Bot die neue Grammatik.
+- **Vorhersage:** Lange, spezifische Phrasen zählen nur so viel, wie sie Belege haben. Fehlen Belege, fällt der
+  Bot auf kürzere, allgemeinere Phrasen zurück (Bayes-Schrumpfung, `language.kappa`).
+- **Sicherheit:** Aus Erwartung und Streuung entsteht eine Sicherheit z. Erst ab einer gewissen Sicherheit
+  „sagt“ die Sprache eine Richtung. Ab `language.z_full` sagt sie sie mit voller Überzeugung.
+- **Sprechen heißt handeln:** Die Engine eröffnet nur, wenn die erwartete Bewegung × Hebel nach Kosten positiv
+  ist. Ranking, 100 USD Margin, Stops vor der Liquidation und das Klassen-Limit gelten unverändert.
+- **Kein Backtest-Wissen:** Die Sprache startet leer und lernt ausschließlich aus dem, was sie bis zu diesem
+  Moment gesehen hat (Historie beim Start, dann live). Der Walk-Forward-Test spielt die Vergangenheit genau so
+  ab, die Sprache sieht dabei nie die Zukunft.
+
+Die Regel-Strategien laufen im Hintergrund weiter und lernen mit. Unter LRN siehst du, wie sie sich im
+Vergleich schlagen. Mit `signal.mode: ensemble` entscheiden wieder sie.
+
 ### Lernen
 
 Der Bot bewertet jede Strategie auf jedem Markt in jedem Takt, nicht nur bei echten Trades. Nach dem
@@ -426,7 +463,7 @@ In den Daten steckt keine einfache, stabile Kante nach Kosten.
 ## Terminal (Dashboard)
 
 Bedienung über die Kommandozeile oben rechts, im Bloomberg-Stil: `GEV <GO>`, `LRN`, `RES` und so weiter.
-Die Seiten erreichst du auch über F1–F11.
+Die Seiten erreichst du auch über F1–F12.
 
 | Taste | Seite | Inhalt |
 |---|---|---|
@@ -441,6 +478,7 @@ Die Seiten erreichst du auch über F1–F11.
 | F9 | SYSTEM | Feed-Status, Steuerung (Pause, Fortsetzen, Flat, Reset), Markt-Spezifikationen, Kosten-Kalibrierung, Konfiguration |
 | F10 | HILFE | Kommandos und Methodik |
 | F11 | ALPHA-LABOR | alle Signal-Familien nach echten Kosten in zwei Zeithälften; reines Signal und echter Maximalhebel-Trade; ehrlicher Zufalls-Vergleich (`LAB <GO>`) |
+| F12 | SPRACHE | Marktsprache: Vokabular, was die Märkte gerade „sagen“, stärkste Phrasen, Stimmung, Lernkurve (`SPRACHE <GO>`) |
 
 Kommandos: `PAUSE`, `RESUME`, `FLAT [GEV]`, `RESET`, `RUN RES`, `<MARKT> <GO>`.
 
