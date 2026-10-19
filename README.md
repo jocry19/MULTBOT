@@ -10,11 +10,11 @@ im Plus erwartet werden. Zur Bedienung gibt es ein Terminal-Dashboard im Bloombe
 
 ## Neu in MULT Q2
 
-- **Marktsprache (Standard, F12).** Keine festen Strategien mehr: Jede Kerze wird zu einem Wort aus Bewegung,
-  Volumen und Spanne, jeweils am eigenen Verhalten des Markts gemessen. Dazu kommt die Stimmung des
-  Gesamtmarkts. Der Bot lernt live, was auf welche Wortfolgen folgt, mit Vergessen und einem eigenen
-  „Dialekt“ je Markt. Er „spricht“ (handelt) nur mit genug Belegen und wenn die erwartete Bewegung die
-  Kosten übersteigt. Im Walk-Forward war das besser als die bisherigen Regel-Strategien, siehe unten.
+- **Lebende Marktsprache (Standard, F12).** Keine festen Strategien und kein festes Alphabet. Alle 70
+  Statistiken je Markt (inklusive Orderbuch, Funding und Stimmung aller Märkte) werden am eigenen Verhalten
+  des Markts gemessen. Über acht Sinne bildet der Bot seinen Wortschatz selbst. Was die Wörter bedeuten, lernt
+  er live mit drei unterschiedlich schnell vergessenden Gedächtnissen. Gehandelt wird nur, was sich
+  bewahrheitet hat und die Kosten schlägt. Ehrliche Testergebnisse siehe unten.
 
 - **Alpha-Labor (F11, `python -m multbot lab`).** Das Labor prüft rund 90 vorab festgelegte Strategie-Hypothesen
   auf ≈ 208 Tagen Stunden-Historie der liquidesten Märkte:
@@ -230,66 +230,78 @@ Hyperliquid WS/REST ─► Mark-Preis-Kerzen + Orderbuch + Trades + Funding/OI
 - **Kapitalmodell `compounding` (optional):** ein einziges Konto mit Startkapital, das wächst oder schrumpft.
   Bei Totalverlust beginnt eine neue *Epoche*, der Lernstand bleibt.
 
-### Marktsprache (`signal.mode: language`, Seite F12)
+### Lebende Marktsprache (`signal.mode: language`, Seite F12)
 
-Statt fester Strategien liest der Bot den Markt wie eine Sprache, die er live lernt.
+Keine festen Strategien und kein festes Alphabet. Der Bot hört zu, bildet daraus selbst Wörter, lernt live,
+was sie bedeuten, und spricht (handelt) nur, wenn sich seine Aussagen bisher bewahrheitet haben.
 
-- **Alphabet:** Jede abgeschlossene Kerze jedes Markts wird zu einem *Wort* aus drei Buchstaben. Jeder
-  Buchstabe wird am eigenen, jüngsten Verhalten dieses Markts gemessen; es gibt keine festen Preis- oder
-  Indikator-Schwellen.
-  - Bewegung (5 Stufen): ⇊ stark fallend · ↓ fallend · · seitwärts · ↑ steigend · ⇈ stark steigend, jeweils
-    in Einheiten der eigenen Volatilität
-  - Volumen (3 Stufen): ◦ leise · • normal · ● laut, gemessen am eigenen jüngsten Volumen
-  - Spanne (3 Stufen): ▁ eng · ▄ normal · █ weit, Hoch–Tief der Kerze gemessen an der Volatilität
-  - Das ergibt 45 Wörter, z. B. `↑●█` = steigend, laut, weite Spanne.
-- **Stimmung:** Dazu kommt die Stimmung des *ganzen* Markts in der letzten abgeschlossenen Kerze: wie viele
-  Märkte gestiegen sind (Risk-off / gemischt / Risk-on) und wie hektisch es war (ruhig / normal / hektisch).
-- **Grammatik:** Für jede Phrase merkt sich der Bot, was danach im Mittel passierte, gemessen als Bewegung über
-  den Lern-Horizont in Volatilitäts-Einheiten. Es gibt fünf Arten von Phrasen:
-  - das letzte Wort
-  - die letzten zwei Wörter, jeweils mit Stimmung
-  - die letzten drei Wörter
-  - den „Dialekt“ jedes einzelnen Markts
-  - die Stimmung allein
-  Das funktioniert wie die Wortvorhersage einer Handy-Tastatur.
-- **Vergessen:** Alte Belege verblassen exponentiell. Hört eine Phrase auf zu funktionieren, verschwindet ihr
-  Einfluss. Spricht der Markt anders, lernt der Bot die neue Grammatik.
-- **Vorhersage:** Lange, spezifische Phrasen zählen nur so viel, wie sie Belege haben. Fehlen Belege, fällt der
-  Bot auf kürzere, allgemeinere Phrasen zurück (Bayes-Schrumpfung, `language.kappa`).
-- **Sicherheit:** Aus Erwartung und Streuung entsteht eine Sicherheit z. Erst ab einer gewissen Sicherheit
-  „sagt“ die Sprache eine Richtung. Ab `language.z_full` sagt sie sie mit voller Überzeugung.
-- **Sprechen heißt handeln:** Die Engine eröffnet nur, wenn die erwartete Bewegung × Hebel nach Kosten positiv
-  ist. Ranking, 100 USD Margin, Stops vor der Liquidation und das Klassen-Limit gelten unverändert.
-- **Kein Backtest-Wissen:** Die Sprache startet leer und lernt ausschließlich aus dem, was sie bis zu diesem
-  Moment gesehen hat (Historie beim Start, dann live). Der Walk-Forward-Test spielt die Vergangenheit genau so
-  ab, die Sprache sieht dabei nie die Zukunft.
+- **Laute – jede einzelne Statistik.** Alle Statistiken der Feature-Pipeline je Markt und Kerze: Kurs,
+  Momentum, Lage in Range und Kanälen, Volatilität, Spanne, Charakter (Hurst, Effizienz, Autokorrelation),
+  Volumen, Orderfluss, Orderbuch, Funding, Prämie, Open Interest, Leitmarkt und Tageszeit. Dazu kommen
+  7 Stimmungswerte aller Märkte, zusammen 70. Jede Statistik wird am jüngsten Verhalten *dieses* Markts
+  gemessen (Halbwertszeit 2 Tage): Laut ist, was für diesen Markt gerade ungewöhnlich ist. Nur `funding_ann`
+  fehlt, weil es eine exakte Kopie von `funding_h` ist.
+- **Wörter – selbst gebildet.** Der Bot hört über acht Sinne: Bewegung, Lage, Energie, Charakter, Fluss,
+  Positionierung, Umfeld und Zeit. Dazu spricht der Gesamtmarkt. In jedem Sinn entsteht der Wortschatz beim
+  Zuhören:
+  - Ein neuer Klang lässt ein neues Wort entstehen.
+  - Ein Wort, das niemand mehr benutzt, wird vergessen; sein Platz wird neu vergeben.
+  - Jedes Wort verschiebt sich mit dem, was es hört. Häufige Klänge bekommen feinere Unterscheidungen.
 
-Die Regel-Strategien laufen im Hintergrund weiter und lernen mit. Unter LRN siehst du, wie sie sich im
-Vergleich schlagen. Mit `signal.mode: ensemble` entscheiden wieder sie.
+  Der Name eines Worts beschreibt, wie es gerade klingt, z. B. „Bar/σ⇈ Volumen↑“.
+- **Bedeutung – live gelernt.** Ein Satz besteht aus:
+  - dem Wort je Sinn
+  - wie sich jedes Wort seit der letzten Kerze verändert hat
+  - jedem Wort zusammen mit dem Bewegungswort
+  - dem Dialekt des Markts und seiner Anlageklasse
 
-**Wie gut liest sie?** Walk-Forward, gleiche Kosten und Regeln, PnL in USD, Validierung / Holdout:
+  Was nach einem Satz passiert, wird zu seiner Bedeutung. Weil Märkte sich oft gemeinsam bewegen, wird das
+  Lernen getrennt: Der *Gesamtmarkt* lernt einmal je Kerze und Anlageklasse, was alle zusammen tun.
+  Gemeinsame Bewegungen zählen so nicht hundertfach. Jeder einzelne Markt lernt, was er *im Vergleich* zu den
+  anderen tut. Drei Gedächtnisse vergessen unterschiedlich schnell (Halbwertszeit 1 / 5 / 25 Tage). Der Bot
+  gewichtet sie danach, welches zuletzt am besten vorhergesagt hat.
+- **Im Zusammenhang lesen.** Entschieden wird nach dem, was ein Markt in den letzten Kerzen gesagt hat
+  (geglättet), nicht nach einer einzelnen Kerze.
+- **Sprechen = Handeln, geglaubt wird nur, was eingetroffen ist.** Jede Aussage wird nach dem Horizont mit
+  dem verglichen, was wirklich passiert ist. Gezählt wird je Lautstärke und Richtung, eine Beobachtung je
+  Kerze über alle Märkte. Geglaubt wird skeptisch (Bayes, Prior: Kanten sind klein, `trust_prior`).
+  Gehandelt wird nur, wenn die geglaubte Bewegung die Kosten schlägt. Ranking, 100 USD Margin, Stops und
+  Klassen-Limit gelten unverändert. Trifft die Sprache nicht mehr zu, verstummt der Bot von selbst.
+- **Nur live zu hören:** Orderbuch, Aggressor-Fluss, Open-Interest-Änderung und bei vielen Märkten der
+  Funding-Verlauf fehlen in der Historie. Diese Laute hört der Bot erst live; die Sinne Fluss und
+  Positionierung lernen dann dazu.
+
+Einstellungen unter `language`:
+
+| Schlüssel | Bedeutung |
+|---|---|
+| `max_words` | größter Wortschatz je Sinn |
+| `memory_days` | Halbwertszeiten der drei Gedächtnisse |
+| `trust_prior` | Skepsis: wie groß eine Kante vorab höchstens sein darf |
+| `proof_sd` | Beweis-Aufschlag: 0 = handelt auf die geglaubte Erwartung, 1 = nur Bewiesenes |
+| `exit_on_reversal` | schließen, wenn die Sprache glaubwürdig das Gegenteil sagt |
+
+Die Regel-Strategien laufen im Hintergrund weiter und lernen mit. Mit `signal.mode: ensemble` entscheiden
+wieder sie.
+
+**Was die Tests zeigen.** Walk-Forward, gleiche Kosten und Regeln, PnL in USD, Validierung / Holdout:
 
 | Variante | 5m (14 Tage) | 15m (52 Tage) | Summe |
 |---|---|---|---|
-| Ensemble aus Regel-Strategien (bisheriger Standard) | +129 / −171 | −56 / +30 | −68 |
-| Sprache v1: nur das letzte Wort, Ausstieg bei Umkehr | −1.580 / −1.011 | – | weit im Minus |
-| Sprache v2: Satzzusammenhang + Stundenverlauf | +134 / −185 | −746 / −149 | −945 |
-| v2 ohne Umkehr-Ausstieg | +107 / −214 | +20 / +206 | +119 |
-| **v2 ohne Umkehr-Ausstieg, vorsichtig (z 6) – Standard** | +246 / −153 | −42 / +169 | **+220** |
+| Ensemble aus Regel-Strategien | +129 / −171 | −56 / +30 | −68 |
+| Feste Marktsprache (45 Wörter, Vorgänger, entfernt) | +246 / −153 | −42 / +169 | +220 |
+| **Lebende Sprache – Standard** | +634 / −496 | −182 / +55 | **+11** |
+| Lebende Sprache, nur Bewiesenes (`proof_sd: 1`) | +60 / −457 | −7 / 0 | −404, kaum Trades |
 
-Was die Entwicklung gezeigt hat:
-
-- **Version 1 war unbrauchbar.** Die Vorhersage hing am jeweils letzten Wort und wechselte mit jeder Kerze. 78 %
-  der Trades endeten durch „Signalumkehr“: dauernd rein und raus, jedes Mal Gebühren.
-- **Version 2 liest im Zusammenhang.** Sie berücksichtigt den Stundenverlauf und entscheidet nach dem, was der
-  Markt *zuletzt* gesagt hat. Die Sprache bestimmt nur noch den Einstieg; Stops, Take-Profit, Trailing und Zeit
-  regeln den Ausstieg.
-- **Die Standard-Variante ist die einzige, die auf beiden Datensätzen im Plus liegt.**
-
-> **Ehrlich:** Das ist besser als das Ensemble, aber kein Beweis für Profitabilität. Die Schwankungsbreite liegt
-> bei ±250–650 USD je Fenster. Das 5m-Holdout ist bei *allen* Varianten negativ, und die Sprache handelt mehr
-> (≈ 400 statt ≈ 100–150 Trades je Fenster). Ihr Vorteil: Sie ist nicht auf eine feste Idee festgelegt und
-> passt sich an, wenn der Markt „anders spricht“.
+> **Ehrlich:** Keine Variante ist nachweislich profitabel; alle Ergebnisse liegen innerhalb der
+> Schwankungsbreite (±230–430 USD je Fenster). Die Diagnose der lebenden Sprache ist eindeutig:
+> - Ihre Vorhersagen treffen langfristig nicht besser als Zufall (IC ≈ 0).
+> - Welcher Markt besser läuft als die anderen, erkennt sie ebenfalls kaum (relativer IC ≈ 0,005).
+> - Mit `proof_sd: 1` schweigt sie fast immer, weil sich nichts sicher bewährt.
+>
+> In diesen Daten steckt bei einer Stunde Horizont nach Kosten keine verlässliche Kante – das deckt sich mit
+> dem Alpha-Labor. Die Sprache gibt das offen zu, statt eine Strategie zu erfinden. Sie hört weiter zu und
+> beginnt von selbst zu handeln, sobald sich ihre Aussagen bewahrheiten.
 
 ### Lernen
 
@@ -508,7 +520,7 @@ Die Seiten erreichst du auch über F1–F12.
 | F9 | SYSTEM | Feed-Status, Steuerung (Pause, Fortsetzen, Flat, Reset), Markt-Spezifikationen, Kosten-Kalibrierung, Konfiguration |
 | F10 | HILFE | Kommandos und Methodik |
 | F11 | ALPHA-LABOR | alle Signal-Familien nach echten Kosten in zwei Zeithälften; reines Signal und echter Maximalhebel-Trade; ehrlicher Zufalls-Vergleich (`LAB <GO>`) |
-| F12 | SPRACHE | Marktsprache: Vokabular, was die Märkte gerade „sagen“, stärkste Phrasen, Stimmung, Lernkurve (`SPRACHE <GO>`) |
+| F12 | SPRACHE | Lebende Sprache: was die Märkte gerade sagen, Wortschatz je Sinn, Bewährungs-Tabelle, Übergänge, Stimmung, Lernkurve (`SPRACHE <GO>`) |
 
 Kommandos: `PAUSE`, `RESUME`, `FLAT [GEV]`, `RESET`, `RUN RES`, `<MARKT> <GO>`.
 

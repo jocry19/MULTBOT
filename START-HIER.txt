@@ -9,12 +9,13 @@ nach Kosten im Plus erwartet werden.
 Gemessen wird der PnL in USD (realisiert + offen) - kein Kontostand, der
 limitiert, kein Totalverlust. Einstellbar in config.yaml unter "account".
 
-WIE ER ENTSCHEIDET (Standard: "Marktsprache"): keine festen Strategien.
-Jede Bar wird zu einem Wort (Bewegung x Volumen x Spanne), dazu die
-Stimmung aller Maerkte und der Verlauf der letzten Stunde. Der Bot lernt
-live, was auf welche Woerter folgt, und vergisst Altes wieder. Seite F12
-("SPRACHE") zeigt, was er gerade liest. Zurueck zum alten Verfahren:
-in config.yaml  signal: mode: ensemble
+WIE ER ENTSCHEIDET (Standard: "lebende Marktsprache"): keine festen Strategien,
+kein festes Alphabet. Alle Statistiken jedes Markts (Kurs, Volumen, Orderbuch,
+Funding, Stimmung aller Maerkte ...) werden zu Lauten, daraus bildet er seinen
+Wortschatz selbst und lernt live, was die Woerter bedeuten. Gehandelt wird nur,
+was sich bisher bewahrheitet hat und die Kosten schlaegt - sonst schweigt er.
+Seite F12 ("SPRACHE") zeigt, was er gerade hoert und glaubt.
+Zurueck zum alten Verfahren: in config.yaml  signal: mode: ensemble
 
 UPDATE VON MULTBOT: Diesen Ordner neben den alten MULTBOT-Ordner legen.
 Beim ersten Start uebernimmt MULT Q2 automatisch Konto, offene Positionen
