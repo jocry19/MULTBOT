@@ -186,9 +186,10 @@ class Engine:
                 v.status = f"ORDER {'BUY' if po['side'] > 0 else 'SELL'} @ {po['limit']:.6g}"
                 return
         pos = self.account.positions.get(coin)
+        reversal_exit = cfg.signal.mode != "language" or cfg.language.exit_on_reversal
         if pos:
             pos.bars += 1
-            if pos.side * final <= -cfg.signal.exit_threshold:
+            if reversal_exit and pos.side * final <= -cfg.signal.exit_threshold:
                 self._close(coin, self.last_px.get(coin, px), "Signalumkehr", t)
             elif pos.bars >= cfg.risk.max_hold_bars:
                 self._close(coin, self.last_px.get(coin, px), "Zeit-Stop", t)
