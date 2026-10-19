@@ -264,6 +264,52 @@ Lern-Horizont (Standard 12 Bars = 1 h) passiert Folgendes:
 > - Live sperrt der Bot neue Einstiege, wenn sich das Oracle seit 20 Minuten nicht bewegt hat, die Börse
 >   des Basiswerts also geschlossen ist. Den Grund schreibt er ins Journal.
 
+### Alpha-Labor (`python -m multbot lab` oder F11 im Terminal)
+
+Das Labor ist die Grundlagenforschung hinter dem Bot. Es beantwortet die Frage: Gibt es in den Daten überhaupt
+eine einfache, stabile Kante, die nach allen Kosten übrig bleibt?
+
+- **Daten:** die N liquidesten Märkte (`research.lab_markets`, Standard 80) mit bis zu 5.000 Stunden-Kerzen
+  (≈ 208 Tage) samt Funding- und Prämien-Historie. Der erste Lauf lädt etwa 30–40 Minuten, danach kommt alles
+  aus dem Cache.
+- **Hypothesen:** rund 25 Regeln × 4 Haltedauern (4 h, 12 h, 24 h, 48 h). Sie sind vorab festgelegt und werden
+  nicht nachträglich optimiert:
+  - Zeitreihen-Momentum und -Reversion über 4 h bis 7 Tage
+  - Querschnitts-Momentum und Residual-Reversion gegenüber dem Gesamtmarkt
+  - EMA-Trend und Extrembewegungen
+  - Funding-Carry, auch im Querschnitt, und Prämien-Reversion
+  - Momentum und Wochenend-Drift bei Aktien-Perps
+  - Markt-Beta als Referenz
+- **Zwei Rechenweisen:**
+  1. *Signal pur:* Einstieg zum Schlusskurs, Ausstieg nach H Stunden. Eingestiegen wird zu jeder Stunde, damit
+     keine Uhrzeit bevorzugt ist.
+  2. *Echter Bot-Trade:* 100 USD Margin × Maximalhebel, Stop bei 60 % der Liquidationsdistanz, geprüft an den
+     Stunden-Hochs und -Tiefs.
+- **Kosten:** Gebühren je Markt (HIP-3-Skalierung), Markteinfluss aus den aktuellen Orderbüchern, 1 bp
+  Slippage, Funding während der Haltedauer.
+- **Bewertung:** Ein ✓ gibt es nur, wenn eine Hypothese in beiden Zeithälften und in beiden Rechenweisen
+  positiv ist. Daneben steht, wie viele ✓ allein durch Zufall zu erwarten wären.
+
+**Ergebnis der Entwicklung (Stand Okt. 2026, 58–120 Märkte, 24. März – 19. Okt. 2026):**
+
+- **Kurze Haltedauern verlieren durchweg.** Das gilt für alles unter 4 h, quer durch alle Familien, oft mit
+  t-Werten unter −3. Die Kosten von ~3 bps (xyz) bis ~7 bps (Krypto) je Round-Trip sind größer als jede
+  einfache Vorhersage. Das erklärt, warum ein 5-Minuten-Bot kaum Gewinn machen kann.
+- **Ein scheinbarer Fund war ein Artefakt.** Querschnitts-Reversion mit 24 h Haltedauer sah zunächst stark aus.
+  Gemittelt über alle Einstiegsstunden verschwand der Effekt. Positiv war er nur beim Einstieg um 21–22 UTC,
+  und das ist bei 24 getesteten Uhrzeiten mit Zufall vereinbar.
+- **Momentum über mehrere Tage ist als Signal leicht positiv.** Mit Maximalhebel wird es aber ausgestoppt:
+  Bei 10–50x liegt die Liquidation nur 1–5 % entfernt, Tagesschwankungen sind größer. In den Märkten mit wenig
+  Hebel (3–5x) bleibt nichts Stabiles übrig.
+- **Gesamtbilanz:** 2 von 92 Tests bestehen. Das ist weniger, als der Zufall erwarten lässt. Die beiden sind
+  Aktien-Perps über das Wochenende long, mit nur ~30 Wochenenden in den Daten. Positiv ist sonst nur der
+  Markt-Trend selbst (immer long, 48 h). Das ist Beta dieses Zeitraums, keine Strategie.
+
+> **Fazit:** Mit öffentlichen Preis- und Funding-Daten, Taker-/Maker-Gebühren von Tier 0 und erzwungenem
+> Maximalhebel gibt es in diesem Zeitraum keine einfache, stabile Kante. Der Bot lernt live weiter, und das
+> Labor lässt sich jederzeit neu starten, um zu sehen, ob sich das ändert. Wer ein eigenes Konto mit
+> Staking-Rabatt modellieren will, setzt `fees.staking_discount` (bis 0,40). Das senkt die Kosten spürbar.
+
 ### Profitabilität: was der Walk-Forward-Test zeigt
 
 Die Standardwerte in `config.yaml` sind nicht geschätzt. Sie wurden per Walk-Forward mit unberührtem
