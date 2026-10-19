@@ -346,6 +346,9 @@ risk:
 
 signal:
   interval: "5m"                # Entscheidungs-Takt
+  mode: language                # language: liest den Markt wie eine Sprache (Wörter aus Bewegung/Volumen/Spanne,
+                                #   live gelernte Grammatik, keine festen Strategien)
+                                # ensemble: gewichtete Abstimmung der Regel-Strategien + ML (bisheriges Verhalten)
   entry_threshold: 0.28         # |Ensemble-Score| für Einstieg
   exit_threshold: 0.22          # Gegensignal-Stärke für Ausstieg
   min_agreement: 0.55           # gewichteter Anteil der Strategien in Signalrichtung
@@ -371,6 +374,11 @@ signal:
   move_prior_n: 5000            # zählt wie so viele Beobachtungen, bis echte Live-Daten da sind
   use_lead_lag: false           # Lead-Lag-Features ggü. BTC / XYZ100. Walk-Forward: auf 5m und 15m schlechter
   disabled_strategies: [leadlag] # Strategien, die nie ins Ensemble gehen (Schlüssel wie im Terminal)
+
+language:                       # Marktsprache (signal.mode: language)
+  kappa: 100                    # wie viele Belege eine Phrase braucht, bis sie mehr zählt als die kürzere Phrase
+  kappa_dialect: 300            # … für den eigenen „Dialekt“ eines Markts
+  z_full: 4.0                   # Sicherheit (z), ab der die Sprache mit voller Überzeugung „spricht“
 
 learning:
   hedge_eta: 0.06               # Lernrate der Multiplicative-Weights

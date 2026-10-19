@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import math
+import time
 from collections import deque
 from pathlib import Path
 
@@ -57,6 +58,7 @@ class JSON(Response):
 def create_app(cfg: Config, runner: BaseRunner) -> Starlette:
     research_state = {"running": False, "progress": 0.0, "error": None, "report": None}
     lab_state = {"running": False, "progress": 0.0, "error": None, "report": None}
+    lang_cache = {"ts": 0.0, "data": None}
 
     def load_lab():
         p = cfg.data_path("research", "lab_latest.json")
@@ -199,6 +201,29 @@ def create_app(cfg: Config, runner: BaseRunner) -> Starlette:
         asyncio.create_task(job())
         return JSON({"ok": True})
 
+    async def language(_: Request):
+        if not runner.engine:
+            return JSON({"ready": False})
+        if time.time() - lang_cache["ts"] < 4 and lang_cache["data"]:
+            return JSON(lang_cache["data"])
+        coins = sorted(runner.specs, key=lambda c: -runner.specs[c].day_volume)
+        snap = runner.brain.lang.snapshot(coins, 30)   # in the event loop: the model is not thread-safe
+        snap["ready"] = True
+        snap["mode"] = cfg.signal.mode
+        now = {}
+        for c in coins[:40]:
+            v = runner.engine.views.get(c)
+            if v is not None and v.signals:
+                lp = runner.brain.lang
+                ws = lp.words.get(c)
+                if ws:
+                    mu, z, ev = lp.predict(lp._contexts(c, ws, lp.mood))
+                    now[c] = {"sentence": snap["sentences"].get(c), "mu": mu, "z": z, "evidence": ev,
+                              "status": v.status}
+        snap["now"] = now
+        lang_cache.update(ts=time.time(), data=snap)
+        return JSON(snap)
+
     async def lab(_: Request):
         rep = lab_state["report"] or load_lab()
         return JSON({"report": rep, "running": lab_state["running"], "progress": lab_state["progress"],
@@ -302,6 +327,7 @@ def create_app(cfg: Config, runner: BaseRunner) -> Starlette:
         Route("/api/research", research),
         Route("/api/research/run", research_run, methods=["POST"]),
         Route("/api/lab", lab),
+        Route("/api/language", language),
         Route("/api/export/trades.csv", export_trades),
         Route("/api/lab/run", lab_run, methods=["POST"]),
         Route("/api/history/{kind}", history),
