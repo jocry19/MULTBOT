@@ -15,6 +15,7 @@ import time
 
 import numpy as np
 
+from .. import __version__
 from ..config import Config
 from ..data.bars import Bar, BarSeries
 from ..data.history import History, fetch_history
@@ -398,7 +399,7 @@ class BaseRunner:
 
     def info(self) -> dict:
         ready = len(self.specs) if not self.engine or self.engine.ready is None else len(self.engine.ready)
-        return {"kind": self.kind, "run": self.run_id, "status": self.status, "started": self.started_ms,
+        return {"version": __version__, "kind": self.kind, "run": self.run_id, "status": self.status, "started": self.started_ms,
                 "feed": self.feed_stats, "interval": self.cfg.signal.interval, "now": self.now(),
                 "markets": len(self.specs), "ready": ready}
 

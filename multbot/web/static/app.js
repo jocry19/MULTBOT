@@ -127,6 +127,7 @@
     if (!S) return;
     const info = S.info || {};
     const mode = $("#mode");
+    if (info.version && !A.verShown) { const sub = $(".brand .sub"); if (sub) sub.textContent = "PERP SIGNAL TERMINAL · v" + info.version; A.verShown = true; }
     mode.textContent = info.kind === "sim" ? "SIMULATION" : info.status && info.status.phase === "error" ? "FEHLER" : "LIVE · PAPER";
     mode.className = "badge" + (info.kind === "sim" ? " sim" : info.status && info.status.phase === "error" ? " err" : "");
     if (!S.ready) return;
@@ -885,7 +886,7 @@
 
   /* ── F7 BLOTTER ─────────────────────────────────────────────────────── */
   RENDER.BLTR = {
-    build: () => panel("bsum", "Trade-Statistik (gesamte Historie aus der Datenbank)", "STAT", "c12") +
+    build: () => panel("bsum", "Trade-Statistik (gesamte Historie aus der Datenbank) · <a href=\"/api/export/trades.csv\" class=\"btn\" download>⇩ CSV-Export</a>", "STAT", "c12") +
       panel("btab", "Blotter · alle simulierten Trades", "BLTR", "c8 h480", { flush: true }) +
       panel("bdet", "Trade-Detail · warum wurde gehandelt?", "DET", "c4 h480") +
       canvasPanel("bcoin", "Netto je Markt", "PNL", "c6 h240") + canvasPanel("bhist", "Verteilung Netto-PnL", "DIST", "c6 h240"),

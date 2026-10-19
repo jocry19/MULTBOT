@@ -229,6 +229,27 @@ def create_app(cfg: Config, runner: BaseRunner) -> Starlette:
         asyncio.create_task(job())
         return JSON({"ok": True})
 
+    async def export_trades(_: Request):
+        """All closed trades of this run as CSV (Excel / Numbers / Google Sheets)."""
+        import csv
+        import io
+        rows = runner.store.trades(runner.run_id, 1_000_000) if runner.store else []
+        cols = ["entry_ms", "exit_ms", "coin", "side", "leverage", "size", "entry_px", "exit_px", "margin", "pnl",
+                "fees", "funding", "net", "roe", "r_multiple", "reason", "regime", "score", "pwin", "mae", "mfe",
+                "epoch"]
+        buf = io.StringIO()
+        w = csv.writer(buf, delimiter=";")
+        w.writerow(["entry_utc", "exit_utc"] + cols[2:] + ["exp_roe", "rank"])
+        from datetime import datetime, timezone
+        iso = lambda ms: datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if ms else ""
+        for r in rows:
+            dec = (r.get("detail") or {}).get("decision") or {}
+            rk = dec.get("rank")
+            w.writerow([iso(r.get("entry_ms")), iso(r.get("exit_ms"))] + [r.get(c) for c in cols[2:]] +
+                       [dec.get("exp_roe"), f"{rk[0]}/{rk[1]}" if rk else ""])
+        return Response(buf.getvalue(), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="mult-q2-trades-{runner.run_id}.csv"'})
+
     async def history(request: Request):
         kind = request.path_params["kind"]
         if not runner.store:
@@ -281,6 +302,7 @@ def create_app(cfg: Config, runner: BaseRunner) -> Starlette:
         Route("/api/research", research),
         Route("/api/research/run", research_run, methods=["POST"]),
         Route("/api/lab", lab),
+        Route("/api/export/trades.csv", export_trades),
         Route("/api/lab/run", lab_run, methods=["POST"]),
         Route("/api/history/{kind}", history),
         Route("/api/corr", corr),
