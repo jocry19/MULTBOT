@@ -13,6 +13,7 @@ from ..exchange.meta import MarketSpec
 from ..features.micro import MicroState
 from ..features.regime import classify
 from ..learning.brain import Brain
+from ..learning.language import word_symbol
 from ..strategies.library import BY_KEY, ML_KEY, evaluate_all
 from ..util import HOUR_MS, fmt_ts
 from .account import Account, Position
@@ -106,22 +107,30 @@ class Engine:
         sig = evaluate_all(frow)
         scores = {k: s for k, (s, _) in sig.items()}
         d = self.brain.decide(coin, regime.label, scores, frow)
-        final = d["final"]
+        lp = self.brain.lang.read(coin, t, frow, learn, pretrain)
+        language = cfg.signal.mode == "language"
+        dec = d
+        if language:   # the market's language decides; the rule strategies keep learning for comparison only
+            dec = {**d, "final": lp["final"], "agreement": 1.0, "coverage": 1.0, "contrib": [("sprache", lp["final"])],
+                   "phrase": " ".join(word_symbol(w) for w in lp["sentence"]), "lang_z": lp["z"],
+                   "evidence": lp["evidence"]}
+        final = dec["final"]
         cand = (1 if final > 0 else -1) if abs(final) >= 0.5 * cfg.signal.entry_threshold else 0
         cost = self.exec.round_trip_cost(coin, t)
         if cand:  # funding the position would pay while held (HIP-3 funding can be 0.5 %/8 h)
             cost += max(0.0, cand * frow.get("funding_h", 0.0)) * cfg.signal.funding_hold_hours
-        meta_x = self.brain.meta_vector(d, frow, cand, regime.label) if cand else None
+        meta_x = self.brain.meta_vector(d, frow, cand, regime.label) if cand and not language else None
         pwin = self.brain.p_win(meta_x) if meta_x is not None else None
         exp_move = exp_roe = None
         if cand:
-            exp_move = self.brain.expected_move(final, frow.get("vol", 0.0))   # in signal direction
+            exp_move = lp["exp_move"] if language else self.brain.expected_move(final, frow.get("vol", 0.0))
             exp_roe = self.specs[coin].leverage * (exp_move - cost)        # net return on the 100 USD margin
         if learn:
-            self.brain.observe(coin, t, frow["close"], frow.get("vol", 1e-4), regime.label, d, frow, meta_x, cand,
-                               cost, pretrain)
-        return {"regime": regime, "sig": sig, "d": d, "final": final, "cand": cand, "meta_x": meta_x, "pwin": pwin,
-                "exp_move": exp_move, "exp_roe": exp_roe, "cost": cost}
+            self.brain.observe(coin, t, frow["close"], frow.get("vol", 1e-4), regime.label, d, frow, meta_x,
+                               (1 if d["final"] > 0 else -1) if abs(d["final"]) >= 0.5 * cfg.signal.entry_threshold
+                               else 0, cost, pretrain)
+        return {"regime": regime, "sig": sig, "d": dec, "final": final, "cand": cand, "meta_x": meta_x, "pwin": pwin,
+                "exp_move": exp_move, "exp_roe": exp_roe, "cost": cost, "lang": lp}
 
     def seed_returns(self, coin: str, closes_t: list[int], rets: list[float]) -> None:
         """History bar returns so correlation guards work from the first live minute."""
@@ -450,7 +459,10 @@ class Engine:
                 return False
         stop_px = fill.px - side * ctx["stop_dist"]
         tp_px = fill.px + side * self.cfg.risk.tp_r * ctx["stop_dist"]
-        reasons = [f"{BY_KEY[k].name if k in BY_KEY else 'ML'} {c:+.3f}" for k, c in d["contrib"][:5]]
+        if d.get("phrase") is not None:   # language mode: the phrase the market just said
+            reasons = [f"Sprache {d['phrase']} → z {d['lang_z']:+.1f} (Belege {d['evidence']})"]
+        else:
+            reasons = [f"{BY_KEY[k].name if k in BY_KEY else 'ML'} {c:+.3f}" for k, c in d["contrib"][:5]]
         pos = Position(
             coin=coin, side=side, size=ctx["size"], entry_px=fill.px, leverage=ctx["leverage"],
             maint_rate=spec.maint_rate, margin=margin, init_margin=margin, opened_ms=t, stop_px=stop_px,

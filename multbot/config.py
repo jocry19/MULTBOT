@@ -85,8 +85,17 @@ class SignalCfg:
     move_shrink: float = 2000.0          # pseudo-observations pulling an expected-move cell to the pooled mean
     move_prior_bps: float = 2.5          # prior for the pooled expected move (walk-forward: ≈ 2–3 bps per hour)
     move_prior_n: float = 5000.0         # … weighted like this many observations
+    mode: str = "language"               # "language": read the market as a language (no fixed strategies)
+                                         # "ensemble": weighted vote of the rule strategies + ML
     use_lead_lag: bool = False           # lead-lag features vs BTC / XYZ100 (walk-forward: hurt on 5m and 15m)
     disabled_strategies: list = field(default_factory=lambda: ["leadlag"])
+
+
+@dataclass
+class LanguageCfg:
+    kappa: float = 100.0               # evidence a phrase needs before it outweighs the shorter phrase
+    kappa_dialect: float = 300.0       # … for a market's own dialect
+    z_full: float = 4.0                # confidence (z) at which the language "speaks" with full conviction
 
 
 @dataclass
@@ -160,6 +169,7 @@ class Config:
     risk: RiskCfg = field(default_factory=RiskCfg)
     signal: SignalCfg = field(default_factory=SignalCfg)
     learning: LearningCfg = field(default_factory=LearningCfg)
+    language: LanguageCfg = field(default_factory=LanguageCfg)
     fees: FeesCfg = field(default_factory=FeesCfg)
     execution: ExecutionCfg = field(default_factory=ExecutionCfg)
     research: ResearchCfg = field(default_factory=ResearchCfg)

@@ -668,3 +668,37 @@ def test_live_pretraining_only_warms_weights_not_evaluations(cfg):
     assert brain.n_resolved > 0 and brain.ml.n > 0 and brain.hedge_global.n > 0
     assert brain.n_clean == 0 and brain.meta.n == 0 and brain.cnt_n.sum() == 0
     assert brain.ic[brain.H].n.sum() == 0 and brain.move.n == 0
+
+
+def test_market_language_learns_a_phrase_and_forgets_nothing_fixed():
+    """A planted grammar (after a loud wide up-bar the market keeps rising) must be learned online."""
+    from multbot.learning.language import MarketLanguage, word_of
+    lang = MarketLanguage(horizon=3, kappa=20, kappa_dialect=50)
+    rng = np.random.default_rng(1)
+    px = {c: 100.0 for c in ("A", "B", "C", "D")}
+    t = 0
+    for step in range(6000):
+        t += 300_000
+        for c in px:
+            signal = rng.random() < 0.15
+            fr = {"ret_z": 2.0 if signal else rng.normal(0, 0.6), "vol_z": 1.5 if signal else 0.0,
+                  "rng_z": 2.5 if signal else 1.0, "vol": 0.002, "close": px[c]}
+            lang.read(c, t, fr)
+            drift = 0.004 if signal else 0.0       # planted: the next 3 bars rise after the "signal word"
+            px[c] *= np.exp(drift / 3 + rng.normal(0, 0.002))
+            lang.on_bar(c, px[c], t)
+    loud_up = word_of({"ret_z": 2.0, "vol_z": 1.5, "rng_z": 2.5})
+    quiet_flat = word_of({"ret_z": 0.0, "vol_z": 0.0, "rng_z": 1.0})
+    up = lang.read("A", t + 300_000, {"ret_z": 2.0, "vol_z": 1.5, "rng_z": 2.5, "vol": 0.002, "close": 100.0},
+                   learn=False)
+    assert up["word"] == loud_up and up["mu"] > 0.3 and up["z"] > 2 and up["final"] > 0.4
+    flat = lang.read("B", t + 300_000, {"ret_z": 0.0, "vol_z": 0.0, "rng_z": 1.0, "vol": 0.002, "close": 100.0},
+                     learn=False)
+    assert flat["word"] == quiet_flat and abs(flat["mu"]) < up["mu"] / 2
+    snap = lang.snapshot()
+    assert snap["phrases_known"] > 10 and snap["ic"] > 0.1 and len(snap["vocab"]) == 45
+    d = json.loads(json.dumps(lang.to_dict()))
+    lang2 = MarketLanguage(horizon=3, kappa=20, kappa_dialect=50)
+    lang2.load(d)
+    assert lang2.predict(lang._contexts("A", lang.words["A"], lang.mood))[0] == pytest.approx(
+        lang.predict(lang._contexts("A", lang.words["A"], lang.mood))[0])

@@ -42,6 +42,7 @@ FEATURES: dict[str, str] = {
     "vwap_dev": "Abstand zum rollierenden VWAP (48) in ATR",
     "vol_z": "Volumen z-Score",
     "ret_z": "Bar-Rendite / Vola",
+    "rng_z": "Spannweite der Bar (Hoch/Tief) / Vola",
     "er_20": "Kaufman Efficiency Ratio (20)",
     "vr_4": "Varianz-Ratio VR(4)",
     "hurst": "Hurst-Exponent (aus VR)",
@@ -186,6 +187,8 @@ def compute_features(a: dict[str, np.ndarray], interval_ms: int, funding_h: np.n
     f["vwap_dev"] = np.nan_to_num((c - ta.rolling_vwap(h, l, c, v, 48)) / atr)
     f["vol_z"] = np.nan_to_num(ta.zscore(np.log1p(np.maximum(v, 0)), 96))
     f["ret_z"] = r / vol
+    with np.errstate(divide="ignore", invalid="ignore"):   # the bar's own high–low range in σ units
+        f["rng_z"] = np.nan_to_num(np.log(np.maximum(h, 1e-300) / np.maximum(l, 1e-300)) / vol, posinf=0.0)
     f["er_20"] = np.nan_to_num(ta.efficiency_ratio(c, 20))
     vr = np.nan_to_num(st.variance_ratio(r, 4, 120), nan=1.0)
     f["vr_4"] = vr
