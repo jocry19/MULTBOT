@@ -93,10 +93,10 @@ class SignalCfg:
 
 @dataclass
 class LanguageCfg:
-    kappa: float = 100.0               # evidence a phrase needs before it outweighs the shorter phrase
-    kappa_dialect: float = 300.0       # … for a market's own dialect
-    z_full: float = 6.0                # confidence (z) at which the language "speaks" with full conviction
-    exit_on_reversal: bool = False     # close when the language turns against the position (walk-forward: off)
+    max_words: int = 32                # largest vocabulary per sense (words are born and forgotten live)
+    memory_days: list = field(default_factory=lambda: [1.0, 5.0, 25.0])   # three memories: half-life in days
+    trust_prior: float = 0.10          # scepticism: how large a proven edge may be a priori (σ·√H units)
+    exit_on_reversal: bool = False     # close when the language credibly says the opposite (beats the costs)
 
 
 @dataclass

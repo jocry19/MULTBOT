@@ -670,39 +670,80 @@ def test_live_pretraining_only_warms_weights_not_evaluations(cfg):
     assert brain.ic[brain.H].n.sum() == 0 and brain.move.n == 0
 
 
-def test_market_language_learns_a_phrase_and_forgets_nothing_fixed():
-    """A planted grammar (after a loud wide up-bar the market keeps rising) must be learned online."""
-    from multbot.learning.language import MarketLanguage, word_of
-    lang = MarketLanguage(horizon=3, kappa=20, kappa_dialect=50)
-    rng = np.random.default_rng(1)
-    px = {c: 100.0 for c in ("A", "B", "C", "D")}
-    t = 0
-    for step in range(6000):
+def _language_world(lang, steps, sign, rng, state, t0=0, n=6):
+    """Synthetic markets: a slowly varying funding imbalance moves the price over the next bars (sign = ±1)."""
+    t = t0
+    for _ in range(steps):
         t += 300_000
-        for c in px:
-            signal = rng.random() < 0.15
-            fr = {"ret_z": 2.0 if signal else rng.normal(0, 0.6), "vol_z": 1.5 if signal else 0.0,
-                  "rng_z": 2.5 if signal else 1.0, "vol": 0.002, "close": px[c]}
-            lang.read(c, t, fr)
-            drift = 0.004 if signal else 0.0       # planted: the next 3 bars rise after the "signal word"
-            px[c] *= np.exp(drift / 3 + rng.normal(0, 0.002))
-            lang.on_bar(c, px[c], t)
-    loud_up = word_of({"ret_z": 2.0, "vol_z": 1.5, "rng_z": 2.5})
-    quiet_flat = word_of({"ret_z": 0.0, "vol_z": 0.0, "rng_z": 1.0})
-    up = lang.read("A", t + 300_000, {"ret_z": 2.0, "vol_z": 1.5, "rng_z": 2.5, "vol": 0.002, "close": 100.0},
-                   learn=False)
-    assert up["word"] == loud_up and up["mu_word"] > 0.3 and up["z_word"] > 2
-    for _ in range(4):   # the decision signal is what the market has been saying lately (smoothed)
-        up = lang.read("A", t + 300_000, {"ret_z": 2.0, "vol_z": 1.5, "rng_z": 2.5, "vol": 0.002, "close": 100.0},
-                       learn=False)
-    assert up["mu"] > 0.3 and up["final"] > 0.4
-    flat = lang.read("B", t + 300_000, {"ret_z": 0.0, "vol_z": 0.0, "rng_z": 1.0, "vol": 0.002, "close": 100.0},
-                     learn=False)
-    assert flat["word"] == quiet_flat and abs(flat["mu_word"]) < up["mu_word"] / 2
-    snap = lang.snapshot()
-    assert snap["phrases_known"] > 10 and snap["ic"] > 0.1 and len(snap["vocab"]) == 45
+        for c in range(n):
+            coin = f"M{c}"
+            st = state.setdefault(coin, {"px": 100.0, "fz": 0.0})
+            st["fz"] = 0.95 * st["fz"] + rng.normal(0, 0.3)
+            r = sign * 0.0012 * np.tanh(st["fz"]) + rng.normal(0, 0.002)
+            st["px"] *= np.exp(r)
+            fr = {"close": st["px"], "vol": 0.002, "ret_z": r / 0.002, "funding_z": st["fz"],
+                  "vol_z": rng.normal(), "rng_z": abs(rng.normal()) + 0.5}
+            lang.on_bar(coin, st["px"], t)
+            lang.read(coin, t, fr, True, False, "crypto")
+            st["fr"] = fr
+    return t
+
+
+def _probe(lang, state, coin, t, fz, reps=6):
+    """Read the market's last real sentence, but with a different funding imbalance."""
+    out = None
+    for _ in range(reps):   # what the market has been saying lately (smoothed)
+        out = lang.read(coin, t, {**state[coin]["fr"], "funding_z": fz}, learn=False)
+    return out
+
+
+def test_living_language_hears_every_statistic():
+    from multbot.features.pipeline import FEATURES
+    from multbot.learning.language import CHANNELS, DUPLICATES, unheard_features
+    assert unheard_features() == set()
+    heard = [s for _, _, st in CHANNELS for s in st]
+    assert len(heard) == len(set(heard))                     # every statistic in exactly one sense
+    assert set(FEATURES) - set(heard) == set(DUPLICATES)
+
+
+def test_living_language_learns_meaning_trusts_only_what_came_true_and_forgets():
+    """No word list, no rule: the vocabulary is born from the data, the meaning of a planted pattern is learned,
+    statements are only believed once they came true, and the meaning flips when the market's language flips."""
+    from multbot.learning.language import MarketLanguage
+    lang = MarketLanguage(horizon=3, bars_per_hour=12, memory_days=[0.25, 1.0, 4.0])
+    rng = np.random.default_rng(7)
+    state = {}
+    t = _language_world(lang, 2500, +1, rng, state)
+    V = lang.vocab
+    assert V.births.sum() > 20 and (V.k <= V.kmax).all() and lang.n_words() > 20
+    assert lang.ic_value() > 0.05
+    names = lang.names()
+    pos = names.index("Positionierung")
+    hi, lo = _probe(lang, state, "M0", t, 2.5), _probe(lang, state, "M0", t, -2.5)
+    assert hi["contrib"][pos] > 0.1 and lo["contrib"][pos] < -0.1                  # what the funding words mean
+    assert hi["pred"] > lo["pred"] + 0.3
+    for sign in (1, -1):                         # statements of both directions came true → believed, tradable
+        assert lang.trust(lang._cell(sign * 1.2 * lang.rms))[0] > 0.1
+    up = {**hi, "s": 1.0, "believed": 0.3}
+    assert "Positionierung" in lang.describe(up) and "bewährt +0.30" in lang.describe(up)
+    snap = lang.snapshot(["M0"])
+    assert snap["words"] == lang.n_words() and snap["now"]["M0"]["words"][0]["sense"] == "Bewegung"
+    assert any(c["believed"] > 0 for c in snap["trust"] if c["side"] == "long")
     d = json.loads(json.dumps(lang.to_dict()))
-    lang2 = MarketLanguage(horizon=3, kappa=20, kappa_dialect=50)
+    lang2 = MarketLanguage(horizon=3, bars_per_hour=12, memory_days=[0.25, 1.0, 4.0])
     lang2.load(d)
-    ctx = lang._contexts("A", lang.words["A"], lang.mood, lang.course["A"])
-    assert lang2.predict(ctx)[0] == pytest.approx(lang.predict(ctx)[0]) and lang2.said["A"] == lang.said["A"]
+    a, b = _probe(lang, state, "M2", t, 1.5, 1), _probe(lang2, state, "M2", t, 1.5, 1)
+    assert a["pred"] == pytest.approx(b["pred"], abs=1e-6) and a["believed"] == pytest.approx(b["believed"])
+    # the market starts to speak differently: the same sound now means the opposite
+    t = _language_world(lang, 2500, -1, rng, state, t)
+    assert _probe(lang, state, "M0", t, 2.5)["contrib"][pos] < 0 < _probe(lang, state, "M1", t, -2.5)["contrib"][pos]
+
+
+def test_living_language_stays_silent_on_noise():
+    from multbot.learning.language import MarketLanguage
+    lang = MarketLanguage(horizon=3, bars_per_hour=12)
+    rng = np.random.default_rng(3)
+    _language_world(lang, 2500, 0, rng, {})
+    assert abs(lang.ic_value(True)) < 0.05
+    assert all(c["believed"] <= 0 for c in lang.snapshot()["trust"])        # nothing came true → nothing believed
+

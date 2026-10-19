@@ -210,18 +210,10 @@ def create_app(cfg: Config, runner: BaseRunner) -> Starlette:
         snap = runner.brain.lang.snapshot(coins, 30)   # in the event loop: the model is not thread-safe
         snap["ready"] = True
         snap["mode"] = cfg.signal.mode
-        now = {}
-        for c in coins[:40]:
+        for c, x in snap["now"].items():
             v = runner.engine.views.get(c)
-            if v is not None and v.signals:
-                lp = runner.brain.lang
-                ws = lp.words.get(c)
-                if ws:
-                    ev = lp.predict(lp._contexts(c, ws, lp.mood, lp.course.get(c, 2)))[2]
-                    mu, z = lp.said.get(c, [0.0, 0.0])
-                    now[c] = {"sentence": snap["sentences"].get(c), "mu": mu, "z": z, "evidence": ev,
-                              "status": v.status}
-        snap["now"] = now
+            x["status"] = v.status if v is not None else ""
+            x["exp_roe"] = v.exp_roe if v is not None else None
         lang_cache.update(ts=time.time(), data=snap)
         return JSON(snap)
 

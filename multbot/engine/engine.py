@@ -13,7 +13,6 @@ from ..exchange.meta import MarketSpec
 from ..features.micro import MicroState
 from ..features.regime import classify
 from ..learning.brain import Brain
-from ..learning.language import word_symbol
 from ..strategies.library import BY_KEY, ML_KEY, evaluate_all
 from ..util import HOUR_MS, fmt_ts
 from .account import Account, Position
@@ -107,18 +106,27 @@ class Engine:
         sig = evaluate_all(frow)
         scores = {k: s for k, (s, _) in sig.items()}
         d = self.brain.decide(coin, regime.label, scores, frow)
-        lp = self.brain.lang.read(coin, t, frow, learn, pretrain)
+        lang = self.brain.lang
+        lp = lang.read(coin, t, frow, learn, pretrain, self.specs[coin].asset_class)
         language = cfg.signal.mode == "language"
-        dec = d
-        if language:   # the market's language decides; the rule strategies keep learning for comparison only
-            dec = {**d, "final": lp["final"], "agreement": 1.0, "coverage": 1.0, "contrib": [("sprache", lp["final"])],
-                   "phrase": " ".join(word_symbol(w) for w in lp["sentence"]), "lang_z": lp["z"],
-                   "evidence": lp["evidence"]}
-        final = dec["final"]
-        cand = (1 if final > 0 else -1) if abs(final) >= 0.5 * cfg.signal.entry_threshold else 0
+        th = cfg.signal.entry_threshold
         cost = self.exec.round_trip_cost(coin, t)
-        if cand:  # funding the position would pay while held (HIP-3 funding can be 0.5 %/8 h)
-            cost += max(0.0, cand * frow.get("funding_h", 0.0)) * cfg.signal.funding_hold_hours
+        if language:
+            # the living language decides: it speaks only when its statement has come true often enough, and the
+            # score says how far the proven expected move beats the costs (score ≥ entry threshold ⟺ move ≥ cost)
+            side = lp["side"]
+            if side:
+                cost += max(0.0, side * frow.get("funding_h", 0.0)) * cfg.signal.funding_hold_hours
+            ratio = lp["exp_move"] / cost if cost > 0 else 0.0
+            final = side * min(1.0, th * ratio)
+            dec = {**d, "final": final, "agreement": 1.0, "coverage": 1.0, "contrib": lang.why(lp), "lang": lp}
+            cand = side if abs(final) >= 0.5 * th else 0
+        else:
+            dec = d
+            final = d["final"]
+            cand = (1 if final > 0 else -1) if abs(final) >= 0.5 * th else 0
+            if cand:  # funding the position would pay while held (HIP-3 funding can be 0.5 %/8 h)
+                cost += max(0.0, cand * frow.get("funding_h", 0.0)) * cfg.signal.funding_hold_hours
         meta_x = self.brain.meta_vector(d, frow, cand, regime.label) if cand and not language else None
         pwin = self.brain.p_win(meta_x) if meta_x is not None else None
         exp_move = exp_roe = None
@@ -460,8 +468,8 @@ class Engine:
                 return False
         stop_px = fill.px - side * ctx["stop_dist"]
         tp_px = fill.px + side * self.cfg.risk.tp_r * ctx["stop_dist"]
-        if d.get("phrase") is not None:   # language mode: the phrase the market just said
-            reasons = [f"Sprache {d['phrase']} → z {d['lang_z']:+.1f} (Belege {d['evidence']})"]
+        if d.get("lang") is not None:   # language mode: what the market said and how often it came true
+            reasons = [f"Sprache: {self.brain.lang.describe(d['lang'])}"]
         else:
             reasons = [f"{BY_KEY[k].name if k in BY_KEY else 'ML'} {c:+.3f}" for k, c in d["contrib"][:5]]
         pos = Position(

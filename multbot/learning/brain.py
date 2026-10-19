@@ -25,6 +25,7 @@ from ..config import Config
 from ..features.pipeline import ML_FEATURES, ml_vector
 from ..features.regime import REGIMES
 from ..strategies.library import ALL_KEYS, ML_KEY, STRATEGY_KEYS
+from ..util import HOUR_MS, INTERVAL_MS
 from .hedge import Hedge, blend_logw, softmax_floor
 from .language import MarketLanguage
 from .online_lr import OnlineLogit
@@ -62,7 +63,9 @@ class Brain:
         self.hedge_global = Hedge(self.keys, lc.hedge_eta, lc.hedge_floor, lc.hedge_decay)
         self.hedge_regime = {r: Hedge(self.keys, lc.hedge_eta, lc.hedge_floor, lc.hedge_decay) for r in REGIMES}
         self.hedge_asset = {c: Hedge(self.keys, lc.hedge_eta, lc.hedge_floor, lc.hedge_decay) for c in self.coins}
-        self.lang = MarketLanguage(self.H, cfg.language.kappa, cfg.language.kappa_dialect, cfg.language.z_full)
+        lg = cfg.language
+        self.lang = MarketLanguage(self.H, HOUR_MS / INTERVAL_MS.get(sc.interval, 300_000), lg.max_words,
+                                   lg.memory_days, lg.trust_prior)
         self.ml = OnlineLogit(ML_FEATURES, lc.lr, lc.l2)
         self.meta = OnlineLogit(META_FEATURES, lc.lr, lc.l2)
         self.arms = BetaVec(nt)
@@ -361,8 +364,8 @@ class Brain:
             "ic_final": float(self.ic[self.H].corr()[self.i_final]), "muted": sorted(self.muted),
             "move_mean": self._pooled_move(), "move_n": self.move.n,
             "weights": self.hedge_global.weights(), "mode": self.cfg.signal.mode,
-            "lang": {"phrases": len(self.lang.stats), "learned": self.lang.n_learned, "ic": self.lang.ic_value(),
-                     "hit": self.lang.hit_rate(), "mood": self.lang.mood},
+            "lang": {"words": self.lang.n_words(), "learned": self.lang.n_learned, "ic": self.lang.ic_value(),
+                     "hit": self.lang.hit_rate()},
         }
         if light:
             return snap

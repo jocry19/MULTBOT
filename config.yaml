@@ -346,8 +346,8 @@ risk:
 
 signal:
   interval: "5m"                # Entscheidungs-Takt
-  mode: language                # language: liest den Markt wie eine Sprache (Wörter aus Bewegung/Volumen/Spanne,
-                                #   live gelernte Grammatik, keine festen Strategien)
+  mode: language                # language: liest alle Statistiken wie eine Sprache, die er live lernt (Wortschatz
+                                #   und Bedeutungen entstehen beim Zuhören, keine festen Strategien)
                                 # ensemble: gewichtete Abstimmung der Regel-Strategien + ML (bisheriges Verhalten)
   entry_threshold: 0.28         # |Ensemble-Score| für Einstieg
   exit_threshold: 0.22          # Gegensignal-Stärke für Ausstieg
@@ -375,13 +375,13 @@ signal:
   use_lead_lag: false           # Lead-Lag-Features ggü. BTC / XYZ100. Walk-Forward: auf 5m und 15m schlechter
   disabled_strategies: [leadlag] # Strategien, die nie ins Ensemble gehen (Schlüssel wie im Terminal)
 
-language:                       # Marktsprache (signal.mode: language)
-  kappa: 100                    # wie viele Belege eine Phrase braucht, bis sie mehr zählt als die kürzere Phrase
-  kappa_dialect: 300            # … für den eigenen „Dialekt“ eines Markts
-  z_full: 6.0                   # Sicherheit (z), ab der die Sprache mit voller Überzeugung „spricht“; Einstieg ab
-                                # z ≈ entry_threshold × z_full ≈ 1,7 (Walk-Forward: vorsichtiger war besser)
-  exit_on_reversal: false       # schließen, wenn die Sprache gegen die Position dreht (Walk-Forward: aus –
-                                # Stops, Take-Profit, Trailing und Zeit entscheiden über den Ausstieg)
+language:                       # Lebende Marktsprache (signal.mode: language) – keine festen Wörter, keine Strategien
+  max_words: 32                 # größter Wortschatz je Sinn; Wörter entstehen und werden vergessen, während er zuhört
+  memory_days: [1, 5, 25]       # drei Gedächtnisse: nach so vielen Tagen ist die Hälfte einer Bedeutung vergessen;
+                                # gewichtet wird live danach, welches zuletzt am besten vorhergesagt hat
+  trust_prior: 0.10             # Skepsis: so groß darf eine Kante vorab höchstens sein (σ·√H). Er glaubt einer
+                                # Aussage erst, wenn sie sich oft genug bewahrheitet hat; kleiner = skeptischer
+  exit_on_reversal: false       # schließen, wenn die Sprache glaubwürdig das Gegenteil sagt (und das die Kosten schlägt)
 
 learning:
   hedge_eta: 0.06               # Lernrate der Multiplicative-Weights
