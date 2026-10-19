@@ -191,8 +191,8 @@ Hyperliquid WS/REST ─► Mark-Preis-Kerzen + Orderbuch + Trades + Funding/OI
 - **Stops** liegen immer vor dem Liquidationspreis, bei höchstens 60 % der Distanz und mindestens 0,4 %
   entfernt. Ab +1R wird nachgezogen (Trailing auf mindestens Break-even). Dazu kommen ein Zeit-Stop und ein
   Ausstieg bei Signalumkehr.
-- **Klumpenrisiko:** höchstens 3 Positionen je Asset-Klasse und Richtung, also z. B. nicht sechs
-  Tech-Aktien-Longs auf einmal. Zusätzlich sperrt eine Korrelationsgrenze (0,75), die sofort aus der
+- **Klumpenrisiko:** höchstens 2 Positionen je Asset-Klasse und Richtung, also z. B. nicht sechs
+  Tech-Aktien-Longs auf einmal. Im Walk-Forward von MULT Q2 war 2 besser als 3. Zusätzlich sperrt eine Korrelationsgrenze (0,75), die sofort aus der
   geladenen Historie berechnet wird.
 - **Kapitalmodell `fixed` (Standard):**
   - Jede Position bekommt genau `position_margin_usd` (100 USD) Margin × Maximalhebel. Bei 10x sind das
@@ -395,6 +395,23 @@ Positionen je Bar, Limit 10.
 >   Bewegung war deshalb etwa zehnfach überschätzt. Die Tabelle lernt jetzt nur aus sauberen Live-Daten und
 >   startet mit vorsichtigen 2,5 bps je Stunde. Die Backtests waren nicht betroffen, sie laufen zeitlich
 >   verschränkt.
+
+**MULT Q2: derselbe Test nach den Audit-Fixes** (Kosten mit Markteinfluss, strengere Maker-Fills, Take-Profit
+nur bei Durchhandeln, Break-even nach Gebühren; PnL in USD, Validierung / Holdout, in Klammern Trades):
+
+| Variante | 5m (14 Tage) | 15m (52 Tage) | Summe |
+|---|---|---|---|
+| max. 5 offen, ohne Ranking | −54 / +30 (293 / 244) | +77 / −173 (246 / 157) | −120 |
+| unbegrenzt, gerankt, ohne Mindestwert | −111 / −229 (424 / 348) | +217 / −302 (319 / 188) | −425 |
+| unbegrenzt, gerankt, E[ROE] ≥ 0 | +65 / −168 (111 / 174) | −60 / −13 (19 / 43) | −176 |
+| **… + höchstens 2 je Klasse und Richtung (Standard Q2)** | +129 / −171 (97 / 144) | −56 / +30 (17 / 38) | **−68** |
+| … ohne Meta-Filter P(Gewinn) | +185 / −205 (256 / 390) | −71 / −87 (83 / 160) | −178 |
+| … doppelter Lern-Horizont | +52 / −393 (95 / 220) | +122 / −231 (143 / 84) | −450 |
+
+Die realistischeren Kosten machen alle Varianten etwas schlechter. Das ist gewollt: Vorher sah der Backtest zu
+gut aus. Der Standard von MULT Q2 ist die Variante, die in den meisten Fenstern vorne liegt, mit dem
+kleinsten Drawdown und den wenigsten Trades. Profitabel ist er damit nicht belegt. Siehe Alpha-Labor:
+In den Daten steckt keine einfache, stabile Kante nach Kosten.
 
 ---
 

@@ -337,7 +337,7 @@ risk:
   daily_loss_pause_pct: 0.0     # Einstiegs-Pause bei Tagesverlust (Anteil, z. B. 0.45). 0 = aus: Im Modus
                                 # fixed hat die Pause im Walk-Forward mehr Gewinner blockiert als Verluste gespart
   corr_limit: 0.75              # keine zwei hochkorrelierten Positionen in dieselbe Richtung
-  max_same_class_side: 3        # max. Positionen je Asset-Klasse und Richtung (z. B. 3× Aktie long)
+  max_same_class_side: 2        # max. Positionen je Asset-Klasse und Richtung (Walk-Forward Q2: 2 besser als 3)
   min_stop_pct: 0.004           # Stop mindestens 0,4 % entfernt (ruhige Nachtstunden → sonst Rausch-Stops)
   skip_stale_markets: true      # kein Einstieg, wenn der Markt "schläft" (eingefrorene Bars)
   max_oracle_age_min: 20        # kein Einstieg, wenn sich das Oracle so lange nicht bewegt hat

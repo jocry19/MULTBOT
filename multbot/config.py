@@ -55,7 +55,7 @@ class RiskCfg:
     stop_liq_frac: float = 0.60
     daily_loss_pause_pct: float = 0.0   # 0 = off (walk-forward: the pause cost more than it saved)
     corr_limit: float = 0.75
-    max_same_class_side: int = 3
+    max_same_class_side: int = 2
     min_stop_pct: float = 0.004
     stop_vol_mult: float = 0.0     # stop ≥ mult × σ(bar) × √stop_vol_bars × price (0 = off)
     stop_vol_bars: int = 12        # time scale of the stop (match the signal horizon)
