@@ -75,6 +75,10 @@ class Engine:
                          "orders": 0, "maker_fills": 0, "cancels": 0}
         self.reject_reasons: dict[str, int] = {}
         self._last_equity_store = 0
+        self.awaiting_book: dict[str, int] = {}
+        self.last_analysis: dict[str, dict] = {}
+        self._last_skip: dict[str, tuple] = {}
+        self.ready: set[str] | None = None   # None = all markets ready (backtest/sim)
 
     # ── helpers ───────────────────────────────────────────────────────────
     def marks(self) -> dict[str, float]:
@@ -92,6 +96,35 @@ class Engine:
             log.info("[%s] %s %s", kind, coin, text)
 
     # ── bar close: the main decision step ─────────────────────────────────
+    def analyze(self, coin: str, t: int, frow: dict[str, float], learn: bool = True) -> dict:
+        """Regime, strategy votes, ensemble decision and meta model for one closed bar."""
+        cfg = self.cfg
+        regime = classify(frow, 0.75 if cfg.risk.skip_stale_markets else 1.01, cfg.risk.max_oracle_age_min)
+        sig = evaluate_all(frow)
+        scores = {k: s for k, (s, _) in sig.items()}
+        d = self.brain.decide(coin, regime.label, scores, frow)
+        final = d["final"]
+        cand = (1 if final > 0 else -1) if abs(final) >= 0.5 * cfg.signal.entry_threshold else 0
+        cost = self.exec.round_trip_cost(coin, t)
+        meta_x = self.brain.meta_vector(d, frow, cand, regime.label) if cand else None
+        pwin = self.brain.p_win(meta_x) if meta_x is not None else None
+        if learn:
+            self.brain.observe(coin, t, frow["close"], frow.get("vol", 1e-4), regime.label, d, frow, meta_x, cand,
+                               cost)
+        return {"regime": regime, "sig": sig, "d": d, "final": final, "cand": cand, "meta_x": meta_x, "pwin": pwin}
+
+    def seed_returns(self, coin: str, closes_t: list[int], rets: list[float]) -> None:
+        """History bar returns so correlation guards work from the first live minute."""
+        have = {t for t, _ in self.returns[coin]}
+        merged = sorted([(t, r) for t, r in zip(closes_t, rets) if t not in have] + list(self.returns[coin]))
+        self.returns[coin].clear()
+        self.returns[coin].extend(merged[-self.returns[coin].maxlen:])
+
+    def learn_bar(self, coin: str, t: int, frow: dict[str, float]) -> None:
+        """Learning only (history pre-training): no views, no positions, no orders."""
+        self.brain.on_bar(coin, frow["close"], t)
+        self.analyze(coin, t, frow, learn=True)
+
     def on_bar_close(self, coin: str, t: int, frow: dict[str, float], n_bars: int, trade: bool = True,
                      learn: bool = True) -> None:
         cfg = self.cfg
@@ -110,24 +143,15 @@ class Engine:
         if n_bars < cfg.signal.warmup_bars:
             v.status = f"WARMUP {n_bars}/{cfg.signal.warmup_bars}"
             return
-        regime = classify(frow, 0.75, block_closed_session=cfg.risk.skip_stale_markets)
-        sig = evaluate_all(frow)
-        scores = {k: s for k, (s, _) in sig.items()}
-        d = self.brain.decide(coin, regime.label, scores, frow)
-        final = d["final"]
+        an = self.analyze(coin, t, frow, learn)
+        regime, sig, d, final, pwin, meta_x = an["regime"], an["sig"], an["d"], an["final"], an["pwin"], an["meta_x"]
         th = cfg.signal.entry_threshold
-        cand = (1 if final > 0 else -1) if abs(final) >= 0.5 * th else 0
-        cost = self.exec.round_trip_cost(coin, t)
-        meta_x = self.brain.meta_vector(d, frow, cand, regime.label) if cand else None
-        pwin = self.brain.p_win(meta_x) if meta_x is not None else None
-        if learn:
-            self.brain.observe(coin, t, px, frow.get("vol", 1e-4), regime.label, d, frow, meta_x, cand, cost)
 
         v.regime = regime.to_dict()
         v.final, v.ens, v.p_up, v.pwin = final, d["ens"], d["p_up"], pwin
         v.agreement, v.coverage = d["agreement"], d["coverage"]
         v.contrib = [[k, round(c, 4)] for k, c in d["contrib"]]
-        v.signals = {k: [round(s, 4), why] for k, (s, why) in sig.items()}
+        v.signals = {k: [round(sc, 4), why] for k, (sc, why) in sig.items()}
         v.signals[ML_KEY] = [round(d["ml_score"], 4), f"P(↑) = {d['p_up']:.3f}" +
                              ("" if self.brain.ml_ready else " (lernt noch)")]
         v.history.append((t, round(final, 4)))
@@ -158,18 +182,57 @@ class Engine:
             return
         if abs(final) < th:
             v.status = "NEUTRAL"
+            self.awaiting_book.pop(coin, None)
             return
         self.counters["signals"] += 1
-        ok, code, reason = self._entry_checks(coin, spec, final, d, pwin, regime, frow, t)
+        self.last_analysis[coin] = {"t": t, "an": an, "frow": frow}
+        self._try_entry(coin, spec, an, frow, t)
+
+    def _try_entry(self, coin: str, spec, an: dict, frow: dict, t: int) -> bool:
+        final, d, pwin = an["final"], an["d"], an["pwin"]
+        v = self.views[coin]
+        ok, code, reason = self._entry_checks(coin, spec, final, d, pwin, an["regime"], frow, t)
+        if ok and self.mode == "live" and not self.exec.book_fresh(coin, t):
+            # unfocused market: subscribe its order book first, enter as soon as it arrives (retry_entry)
+            self.awaiting_book[coin] = t
+            v.status = "WARTE AUF ORDERBUCH"
+            return False
         if not ok:
             v.status = f"GESPERRT: {reason}"
             self.counters["rejected"] += 1
             self.reject_reasons[code] = self.reject_reasons.get(code, 0) + 1
-            if self.mode != "backtest":
-                self.log_event(t, coin, "SKIP", f"{'LONG' if final > 0 else 'SHORT'}-Signal {final:+.2f} "
-                               f"verworfen: {reason}", {"final": final, "pwin": pwin})
+            self._log_skip(t, coin, code, f"{'LONG' if final > 0 else 'SHORT'}-Signal {final:+.2f} verworfen: {reason}",
+                           {"final": final, "pwin": pwin})
+            return False
+        self.awaiting_book.pop(coin, None)
+        self._enter(coin, spec, 1 if final > 0 else -1, d, pwin, an["meta_x"], an["regime"].label, frow, t)
+        return True
+
+    def retry_entry(self, coin: str, now: int) -> bool:
+        """Called when the order book of a waiting candidate arrives (live)."""
+        since = self.awaiting_book.get(coin)
+        la = self.last_analysis.get(coin)
+        if since is None or la is None or now - since > 150_000 or coin in self.account.positions \
+                or coin in self.pending_orders:
+            self.awaiting_book.pop(coin, None)
+            return False
+        return self._try_entry(coin, self.specs[coin], la["an"], la["frow"], now)
+
+    def _log_skip(self, t: int, coin: str, code: str, text: str, detail: dict) -> None:
+        """Rejections are counted always but only journaled when the reason changes or every 30 min."""
+        if self.mode == "backtest":
             return
-        self._enter(coin, spec, 1 if final > 0 else -1, d, pwin, meta_x, regime.label, frow, t)
+        last = self._last_skip.get(coin)
+        if last and last[0] == code and t - last[1] < 30 * 60_000:
+            return
+        self._last_skip[coin] = (code, t)
+        self.log_event(t, coin, "SKIP", text, detail)
+
+    def candidates(self, limit: int = 40) -> list[str]:
+        """Markets with the strongest current signals (for order-book focus)."""
+        th = 0.5 * self.cfg.signal.entry_threshold
+        rows = [(abs(v.final), c) for c, v in self.views.items() if abs(v.final) >= th]
+        return [c for _, c in sorted(rows, reverse=True)[:limit]]
 
     def _entry_checks(self, coin, spec, final, d, pwin, regime, frow, t) -> tuple[bool, str, str]:
         """Returns (ok, reason_code, human_text)."""
@@ -199,11 +262,17 @@ class Engine:
         fund_bps = side * frow.get("funding_h", 0.0) * 1e4
         if to_funding_min < 10 and fund_bps > r.funding_guard_bps:
             return False, "Funding-Wächter", f"Funding {fund_bps:.1f} bps gegen uns in {to_funding_min:.0f} min"
-        for other, p in self.account.positions.items():
-            if p.side == side:
-                c = self.correlation(coin, other)
-                if c > r.corr_limit:
-                    return False, "Korrelation", f"korreliert mit {other} ({c:.2f})"
+        same = [o for o, p in self.account.positions.items() if p.side == side]
+        same += [o for o, po in self.pending_orders.items() if po["side"] == side]
+        cls = spec.asset_class
+        n_cls = sum(1 for o in same if self.specs[o].asset_class == cls)
+        if r.max_same_class_side and n_cls >= r.max_same_class_side:
+            return False, "Klumpenrisiko", (f"schon {n_cls} {cls}-Positionen {'long' if side > 0 else 'short'} "
+                                            f"(max. {r.max_same_class_side})")
+        for other in same:
+            c = self.correlation(coin, other)
+            if c > r.corr_limit:
+                return False, "Korrelation", f"korreliert mit {other} ({c:.2f})"
         return True, "", ""
 
     def reserved_margin(self) -> float:
@@ -223,8 +292,7 @@ class Engine:
             self.counters["rejected"] += 1
             code = "Sizing: " + why.split(" (")[0]
             self.reject_reasons[code] = self.reject_reasons.get(code, 0) + 1
-            if self.mode != "backtest":
-                self.log_event(t, coin, "SKIP", f"Sizing verworfen: {why}")
+            self._log_skip(t, coin, code, f"Sizing verworfen: {why}", {})
             return
         ctx = {"coin": coin, "side": side, "size": order.size, "leverage": order.leverage,
                "stop_dist": order.stop_dist, "margin": order.margin, "d": d, "pwin": pwin, "meta_x": meta_x,
@@ -474,8 +542,10 @@ class Engine:
             return 0.0
         return float(np.corrcoef(x, y)[0, 1])
 
-    def corr_matrix(self) -> dict:
-        coins = list(self.specs)
+    def corr_matrix(self, limit: int = 20) -> dict:
+        held = list(self.account.positions)
+        rest = sorted((c for c in self.specs if c not in held), key=lambda c: -self.specs[c].day_volume)
+        coins = (held + rest)[:limit]
         return {"coins": coins, "m": [[1.0 if a == b else round(self.correlation(a, b), 3) for b in coins]
                                       for a in coins]}
 
@@ -496,7 +566,7 @@ class Engine:
             "run": self.run, "mode": self.mode, "t": self.last_t, "paused": self.manual_pause,
             "paused_until": self.paused_until, "account": acc, "positions": self.positions_view(),
             "orders": [{k: v for k, v in po.items() if k not in ("d", "meta_x")} for po in self.pending_orders.values()],
-            "assets": [self.view_dict(c) for c in self.specs],
+            "assets": [self.asset_row(c) for c in self.specs],
             "journal": list(self.journal)[-150:],
             "trades": [{k: v for k, v in t.items() if k != "detail"} for t in self.trades[-150:]],
             "equity": eq[::step] + ([eq[-1]] if eq and (len(eq) - 1) % step else []),
@@ -504,13 +574,48 @@ class Engine:
             "brain": self.brain.snapshot(light=True),
         }
 
+    def asset_row(self, coin: str) -> dict:
+        """Compact per-market row for the 1-second dashboard push (hundreds of markets)."""
+        v = self.views[coin]
+        s = self.specs[coin]
+        m = self.micro.get(coin)
+        r = v.regime or {}
+        fe = v.features
+        px = self.last_px.get(coin, v.px)
+        row = {"coin": coin, "symbol": s.symbol, "dex": s.dex or "main", "cls": s.asset_class, "lev": s.leverage,
+               "px": px, "final": round(v.final, 4), "p_up": round(v.p_up, 4),
+               "pwin": None if v.pwin is None else round(v.pwin, 4), "status": v.status,
+               "regime": r.get("label", ""), "tradable": r.get("tradable", True),
+               "spread": round(fe.get("spread_bps", 0.0), 2), "ready": self.ready is None or coin in self.ready}
+        if m and m.ctx_ms:
+            row.update(chg=(m.mark / m.prev_day_px - 1) if m.prev_day_px else None, fund=m.funding_h,
+                       vol=m.day_volume, oi=m.open_interest * m.mark,
+                       oracle_age=round((self.last_t - m.oracle_change_ms) / 60_000, 1) if m.oracle_change_ms else None)
+        return row
+
+    def signals_matrix(self, limit: int = 60, coins: list[str] | None = None, reasons: bool = True) -> dict:
+        """Strategy × market score matrix, strongest signals first."""
+        pool = coins or sorted(self.specs, key=lambda c: -abs(self.views[c].final))
+        pool = [c for c in pool if self.views[c].signals][:limit]
+        keys = list(self.views[pool[0]].signals) if pool else []
+        rows = []
+        for c in pool:
+            v = self.views[c]
+            rows.append({"coin": c, "symbol": self.specs[c].symbol, "final": v.final, "agreement": v.agreement,
+                         "coverage": v.coverage, "p_up": v.p_up, "pwin": v.pwin, "status": v.status,
+                         "contrib": v.contrib[:5],
+                         "s": [v.signals.get(k, [0.0, ""])[0] for k in keys],
+                         "why": [v.signals.get(k, [0.0, ""])[1] for k in keys] if reasons else None})
+        return {"keys": keys, "rows": rows, "total": sum(1 for c in self.specs if self.views[c].signals)}
+
     def view_dict(self, coin: str) -> dict:
         v = self.views[coin]
         s = self.specs[coin]
         m = self.micro.get(coin)
         return {
             "coin": coin, "symbol": s.symbol, "dex": s.dex or "main", "leverage": s.leverage,
-            "max_leverage": s.exchange_max_leverage, "taker_fee": s.taker_fee, "is_equity": s.is_equity,
+            "max_leverage": s.exchange_max_leverage, "taker_fee": s.taker_fee, "asset_class": s.asset_class,
+            "ready": self.ready is None or coin in self.ready,
             "px": self.last_px.get(coin, v.px), "t": v.t, "bars": v.bars, "regime": v.regime, "final": v.final,
             "ens": v.ens, "p_up": v.p_up, "pwin": v.pwin, "agreement": v.agreement, "coverage": v.coverage,
             "contrib": v.contrib, "signals": v.signals, "features": v.features, "status": v.status,
@@ -527,6 +632,10 @@ class Engine:
         if not d:
             return
         self.account.load(d.get("account", {}))
+        for c in [c for c in self.account.positions if c not in self.specs]:
+            p = self.account.positions.pop(c)
+            self.account.balance += p.margin   # market removed from config: release margin at entry
+            log.warning("Position %s gehört zu keinem konfigurierten Markt mehr – Margin freigegeben", c)
         self.counters.update(d.get("counters", {}))
         self.paused_until = int(d.get("paused_until", 0))
         self.manual_pause = bool(d.get("manual_pause", False))

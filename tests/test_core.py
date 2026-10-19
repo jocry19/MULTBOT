@@ -189,7 +189,7 @@ def _synthetic_arrays(n=800, drift=0.0005, seed=3):
 
 def test_features_finite_and_aligned():
     a = _synthetic_arrays()
-    f = compute_features(a, 300_000, np.full(len(a["c"]), 1e-5), np.zeros(len(a["c"])), is_equity=False)
+    f = compute_features(a, 300_000, np.full(len(a["c"]), 1e-5), np.zeros(len(a["c"])))
     for k, v in f.items():
         assert len(v) == len(a["c"]), k
         assert np.all(np.isfinite(v)), k
@@ -225,8 +225,6 @@ def test_backtest_end_to_end_accounting(cfg):
     cfg.signal.warmup_bars = 120
     cfg.account.restart_on_ruin = False
     specs = offline_specs(cfg)
-    for s in specs.values():
-        s.is_equity = False
     market = SyntheticMarket(list(specs), 300_000, seed=9)
     hist = market.history(1_700_000_000_000, 700, sub_steps=6)
     brain = Brain(cfg, list(specs))
@@ -286,3 +284,59 @@ def test_history_funding_alignment():
     fr, _ = h.funding_aligned(np.array([-1, 10, 3_600_000, 4_000_000]))
     assert list(fr) == [0.0, 0.1, 0.2, 0.2]
     assert math.isclose(fr[1], 0.1)
+
+
+# ── large-universe additions ─────────────────────────────────────────────────
+def test_parse_assets_compact_and_dedup():
+    from multbot.config import parse_assets
+    out = parse_assets(["BTC", "xyz:TSLA", {"coin": "ETH", "leverage": 5}, "BTC"], "max")
+    assert [a.coin for a in out] == ["BTC", "xyz:TSLA", "ETH"]
+    assert out[0].leverage == "max" and out[2].leverage == 5
+
+
+def test_build_specs_skips_unknown_and_resolves_dex(cfg):
+    from multbot.config import AssetCfg
+    cfg.assets = [AssetCfg("BTC"), AssetCfg("NOPE"), AssetCfg("TSLA")]
+    metas = {"": {"universe": [{"name": "BTC", "maxLeverage": 40, "szDecimals": 5}]},
+             "xyz": {"universe": [{"name": "xyz:TSLA", "maxLeverage": 20, "szDecimals": 3}]}}
+    specs = build_specs(cfg, metas)
+    assert set(specs) == {"BTC", "xyz:TSLA"}
+    assert specs["BTC"].leverage == 40 and specs["xyz:TSLA"].asset_class == "equity"
+
+
+def test_activity_profile_is_causal_and_learns_hours():
+    from multbot.features.pipeline import activity_profile
+    t = (np.arange(24 * 12 * 14) * 300_000 + 1_700_006_400_000).astype(np.int64)   # 14 days of 5m bars
+    hours = (t // 3_600_000) % 24
+    active = ((hours >= 14) & (hours < 21)).astype(float)                           # "US session" only
+    prof = activity_profile(t, active)
+    assert prof[0] == 0.5                                                            # no look-ahead at start
+    late = slice(len(t) - 24 * 12, None)
+    assert prof[late][active[late] == 1].mean() > 0.8
+    assert prof[late][active[late] == 0].mean() < 0.2
+    cut = 2000
+    assert activity_profile(t[:cut], active[:cut])[-1] == pytest.approx(prof[cut - 1])
+
+
+def test_cluster_cap_blocks_same_class_side(cfg):
+    from multbot.features.regime import Regime
+    cfg.risk.max_same_class_side = 2
+    specs = offline_specs(cfg)
+    eng = Engine(cfg, specs, Brain(cfg, list(specs)), mode="backtest")
+    eq_coins = [c for c, s in specs.items() if s.asset_class == "equity"][:3]
+    for c in eq_coins[:2]:
+        p = make_pos(side=1, notional=20.0)
+        p.coin = c
+        eng.account.open(p)
+    d = {"agreement": 1.0}
+    ok, code, _ = eng._entry_checks(eq_coins[2], specs[eq_coins[2]], 0.9, d, None,
+                                    Regime("TREND", "MID", 1, True), {"funding_h": 0.0}, 0)
+    assert not ok and code == "Klumpenrisiko"
+
+
+def test_barseries_merge_keeps_live_bars():
+    from multbot.data.bars import BarSeries
+    s = BarSeries(maxlen=10)
+    s.upsert(Bar(30, 1, 1, 1, 9.0))
+    s.merge([Bar(10, 1, 1, 1, 1.0), Bar(20, 1, 1, 1, 2.0), Bar(30, 1, 1, 1, 3.0)])
+    assert s.cols["t"] == [10, 20, 30] and s.cols["c"] == [1.0, 2.0, 9.0]

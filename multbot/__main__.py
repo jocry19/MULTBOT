@@ -126,7 +126,7 @@ def cmd_run(args, sim: bool = False) -> None:
 
             webbrowser.open(url)
         return
-    runner = SimRunner(cfg, speed=args.speed, seed=args.seed) if sim else LiveRunner(cfg)
+    runner = SimRunner(cfg, speed=args.speed, seed=args.seed, markets=args.markets) if sim else LiveRunner(cfg)
     print(BANNER)
     if args.no_web:
         asyncio.run(_headless(runner))
@@ -160,7 +160,8 @@ def cmd_research(args) -> None:
             last[0] = p
             print(f"\rBacktest [{'█' * p}{'·' * (20 - p)}] {x * 100:5.1f}%", end="", flush=True)
 
-    rep = asyncio.run(run_research(cfg, args.interval, args.bars, progress=prog))
+    coins = args.coins.split(",") if args.coins else None
+    rep = asyncio.run(run_research(cfg, args.interval, args.bars, progress=prog, top=args.top, coins=coins))
     print()
     print_summary(rep)
 
@@ -248,11 +249,14 @@ def main(argv=None) -> None:
         sp.add_argument("--lan", action="store_true", help="im lokalen Netz erreichbar machen (Handy/Tablet)")
         sp.add_argument("--speed", type=float, default=120.0, help="Sim: Zeitraffer-Faktor")
         sp.add_argument("--seed", type=int, default=None, help="Sim: Zufalls-Seed")
+        sp.add_argument("--markets", type=int, default=20, help="Sim: Anzahl synthetischer Märkte")
 
     sr = sub.add_parser("research", help="Walk-Forward-Backtest + Forschung")
     sr.add_argument("--interval", default=None)
     sr.add_argument("--bars", type=int, default=None)
     sr.add_argument("--entry-mode", choices=["maker", "taker"], default=None)
+    sr.add_argument("--top", type=int, default=None, help="nur die N volumenstärksten Märkte (0 = alle)")
+    sr.add_argument("--coins", default=None, help="kommagetrennte Märkte, z. B. BTC,ETH,xyz:TSLA")
     sub.add_parser("markets", help="Live-Markttabelle")
     sc = sub.add_parser("shortcut", help="Desktop-Verknüpfung erstellen (startet als App-Fenster)")
     sc.add_argument("--dir", default=None, help="Zielordner (Standard: Desktop)")

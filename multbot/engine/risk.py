@@ -73,7 +73,7 @@ class RiskManager:
         margin = notional / lev
         lp = liq_price(px, side, margin, size, spec.maint_rate)
         liq_dist = abs(px - lp)
-        min_stop = px * max(0.002, 2.5 * spread_bps / 1e4)
+        min_stop = px * max(r.min_stop_pct, 2.5 * spread_bps / 1e4)
         stop_dist = max(r.stop_atr * atr, min_stop)
         max_stop = r.stop_liq_frac * liq_dist
         if stop_dist > max_stop:

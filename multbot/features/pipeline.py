@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 import numpy as np
 
-from ..util import HOUR_MS, us_session
+from ..util import HOUR_MS
 from . import indicators as ta
 from . import stats as st
 
@@ -59,7 +59,7 @@ FEATURES: dict[str, str] = {
     "premium_bps": "Mark/Oracle-Prämie in bps",
     "hour_sin": "Tageszeit sin",
     "hour_cos": "Tageszeit cos",
-    "session": "US-Session offen (1/0.5/0)",
+    "session": "Gelerntes Aktivitätsprofil dieser Tageszeit (0 = Markt schläft, 1 = aktiv)",
     "tsmom": "Zeitreihen-Momentum (12/48/144)",
     "range_pos": "Position in der 96-Bar-Range",
     # live microstructure (0 in historical replay)
@@ -71,10 +71,11 @@ FEATURES: dict[str, str] = {
     "flow_imb": "Aggressor-Fluss Kauf/Verkauf (5 min)",
     "trade_rate": "Trades pro Minute",
     "oi_chg": "Open-Interest-Änderung 1 h",
+    "oracle_age_min": "Minuten seit der letzten Oracle-Bewegung (live)",
 }
 
 MICRO_KEYS = ["spread_bps", "book_imb5", "book_imb20", "microprice_bps", "depth_usd", "flow_imb",
-              "trade_rate", "oi_chg"]
+              "trade_rate", "oi_chg", "oracle_age_min"]
 
 # features fed to the online ML models (standardised online)
 ML_FEATURES = ["ret_z", "ret_3n", "ret_12n", "ema_spread", "ema_slope", "ema_align", "ema200_dev", "rsi_c",
@@ -84,8 +85,26 @@ ML_FEATURES = ["ret_z", "ret_3n", "ret_12n", "ema_spread", "ema_slope", "ema_ali
                "range_pos_c", "book_imb5", "book_imb20", "microprice_bps", "flow_imb", "oi_chg"]
 
 
+def activity_profile(t: np.ndarray, active: np.ndarray, alpha: float = 0.08, prior: float = 0.5) -> np.ndarray:
+    """Causal per-bucket activity (weekday/weekend × hour of day, UTC).
+
+    Learns each market's own trading hours from the data – US, Korean, Japanese or Chinese
+    stocks, commodities, FX and 24/7 crypto alike – without hard-coded exchange calendars.
+    The value at bar i only uses bars before i that fell into the same bucket.
+    """
+    hours = ((t // 3_600_000) % 24).astype(np.int64)
+    dow = ((t // 86_400_000) + 3) % 7               # 1970-01-01 was a Thursday → 0 = Monday
+    bucket = (hours + 24 * (dow >= 5)).tolist()
+    prof = [prior] * 48
+    out = np.empty(len(t))
+    for i, (b, act) in enumerate(zip(bucket, active.tolist())):
+        out[i] = prof[b]
+        prof[b] += alpha * (act - prof[b])
+    return out
+
+
 def compute_features(a: dict[str, np.ndarray], interval_ms: int, funding_h: np.ndarray | None = None,
-                     premium: np.ndarray | None = None, is_equity: bool = False) -> dict[str, np.ndarray]:
+                     premium: np.ndarray | None = None) -> dict[str, np.ndarray]:
     t, o, h, l, c, v = a["t"], a["o"], a["h"], a["l"], a["c"], a["v"]
     n = len(c)
     f: dict[str, np.ndarray] = {"t": t.astype(float), "close": c}
@@ -165,11 +184,7 @@ def compute_features(a: dict[str, np.ndarray], interval_ms: int, funding_h: np.n
     hours = ((t // 1000) % 86400) / 3600.0
     f["hour_sin"] = np.sin(2 * math.pi * hours / 24)
     f["hour_cos"] = np.cos(2 * math.pi * hours / 24)
-    if is_equity:
-        sess_map = {"REGULAR": 1.0, "PRE": 0.5, "POST": 0.5, "CLOSED": 0.0}
-        f["session"] = np.array([sess_map[us_session(int(x))] for x in t], dtype=float)
-    else:
-        f["session"] = np.ones(n)
+    f["session"] = activity_profile(t, (((h - l) > 0) | (v > 0)).astype(float))
     tsm = np.zeros(n)
     for kk in (12, 48, 144):
         rk = np.nan_to_num(np.log(np.maximum(c, 1e-300) / np.maximum(ta.shift(c, kk, c[0] if n else 0), 1e-300)))

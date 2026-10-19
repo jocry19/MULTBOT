@@ -31,10 +31,10 @@ class AccountCfg:
 
 @dataclass
 class RiskCfg:
-    max_open_positions: int = 4
-    base_margin_pct: float = 0.18
-    min_margin_pct: float = 0.06
-    max_margin_pct: float = 0.35
+    max_open_positions: int = 6
+    base_margin_pct: float = 0.12
+    min_margin_pct: float = 0.04
+    max_margin_pct: float = 0.25
     max_total_margin_pct: float = 0.90
     min_notional: float = 10.0
     max_spread_bps: float = 80.0
@@ -46,8 +46,11 @@ class RiskCfg:
     max_hold_bars: int = 72
     stop_liq_frac: float = 0.60
     daily_loss_pause_pct: float = 0.45
-    corr_limit: float = 0.85
+    corr_limit: float = 0.75
+    max_same_class_side: int = 3
+    min_stop_pct: float = 0.004
     skip_stale_markets: bool = True
+    max_oracle_age_min: float = 20.0
     funding_guard_bps: float = 6.0
 
 
@@ -73,6 +76,7 @@ class LearningCfg:
     l2: float = 0.0005
     meta_min_samples: int = 200
     pretrain_on_history: bool = True
+    live_history_bars: int = 600
     history_bars: int = 4000
     persist_every_s: int = 60
 
@@ -93,11 +97,13 @@ class ExecutionCfg:
     entry_mode: str = "maker"        # "maker" = Limit am Best-Bid/-Ask, "taker" = sofort Market
     maker_timeout_bars: int = 2
     tp_maker: bool = True            # Take-Profit als ruhende Limit-Order (Maker-Gebühr, kein Spread)
+    book_focus: int = 40             # live order books only for this many focus markets
 
 
 @dataclass
 class ResearchCfg:
     train_frac: float = 0.40
+    max_markets: int = 40
     mc_paths: int = 3000
     mc_trades: int = 200
 
@@ -106,12 +112,20 @@ class ResearchCfg:
 class WebCfg:
     host: str = "127.0.0.1"
     port: int = 8050
-    push_interval_s: float = 1.0
+    push_interval_s: float = 1.5
+
+
+@dataclass
+class UniverseCfg:
+    min_day_volume_usd: float = 0.0
+    max_markets: int = 0
 
 
 @dataclass
 class Config:
     assets: list = field(default_factory=list)
+    default_leverage: Any = "max"
+    universe: UniverseCfg = field(default_factory=UniverseCfg)
     account: AccountCfg = field(default_factory=AccountCfg)
     risk: RiskCfg = field(default_factory=RiskCfg)
     signal: SignalCfg = field(default_factory=SignalCfg)
@@ -176,7 +190,22 @@ def load_config(path: str | Path | None = "config.yaml", overrides: dict | None 
     assets_raw = raw.pop("assets", None)
     _merge(cfg, raw)
     if assets_raw:
-        cfg.assets = [AssetCfg(coin=str(a["coin"]), leverage=a.get("leverage", "max")) for a in assets_raw]
+        cfg.assets = parse_assets(assets_raw, cfg.default_leverage)
     else:
         cfg.assets = [AssetCfg(c, lev) for c, lev in DEFAULT_ASSETS]
     return cfg
+
+
+def parse_assets(items, default_leverage="max") -> list[AssetCfg]:
+    """Accepts plain names ("BTC", "xyz:TSLA") or dicts ({coin, leverage}); duplicates are dropped."""
+    out, seen = [], set()
+    for a in items:
+        if isinstance(a, dict):
+            coin, lev = str(a["coin"]).strip(), a.get("leverage", default_leverage)
+        else:
+            coin, lev = str(a).strip(), default_leverage
+        if not coin or coin in seen:
+            continue
+        seen.add(coin)
+        out.append(AssetCfg(coin=coin, leverage=lev))
+    return out

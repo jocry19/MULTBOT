@@ -65,6 +65,14 @@ class BarSeries:
         for b in bars:
             self.upsert(b)
 
+    def merge(self, bars, prefer_existing: bool = True) -> None:
+        """Merge (older) bars into the series, e.g. history fetched after live bars already arrived."""
+        new = {b.t: b.to_list() for b in bars}
+        have = {t: [self.cols[k][i] for k in FIELDS] for i, t in enumerate(self.cols["t"])}
+        rows = {**new, **have} if prefer_existing else {**have, **new}
+        ordered = [rows[t] for t in sorted(rows)][-self.maxlen:]
+        self.cols = {k: [r[j] for r in ordered] for j, k in enumerate(FIELDS)}
+
     def last(self) -> Bar | None:
         if not self.cols["t"]:
             return None

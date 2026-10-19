@@ -42,7 +42,7 @@ def _cache_file(cfg: Config, coin: str, kind: str):
 
 
 async def fetch_history(cfg: Config, rest: HLRest, coin: str, interval: str, n_bars: int,
-                        use_cache: bool = True) -> History:
+                        use_cache: bool = True, with_funding: bool = True) -> History:
     step = INTERVAL_MS[interval]
     end = now_ms()
     start = end - n_bars * step
@@ -66,6 +66,8 @@ async def fetch_history(cfg: Config, rest: HLRest, coin: str, interval: str, n_b
         candles = candles[:-1]
     bars = [Bar.from_hl(c) for c in candles]
 
+    if not with_funding:
+        return History(coin=coin, interval=interval, bars=bars)
     fcache = _cache_file(cfg, coin, "funding")
     fcached: list[dict] = []
     if use_cache and fcache.exists():
@@ -95,7 +97,7 @@ async def fetch_history(cfg: Config, rest: HLRest, coin: str, interval: str, n_b
 
 
 async def fetch_all(cfg: Config, rest: HLRest, interval: str | None = None, n_bars: int | None = None,
-                    use_cache: bool = True) -> dict[str, History]:
+                    use_cache: bool = True, coins: list[str] | None = None) -> dict[str, History]:
     interval = interval or cfg.signal.interval
     n_bars = n_bars or cfg.learning.history_bars
 
@@ -104,5 +106,11 @@ async def fetch_all(cfg: Config, rest: HLRest, interval: str | None = None, n_ba
         log.info("Historie %-10s %5d Bars (%s), %4d Funding-Prints", coin, len(h.bars), interval, len(h.funding_t))
         return coin, h
 
-    results = await asyncio.gather(*(one(c) for c in cfg.coins))
+    sem = asyncio.Semaphore(6)
+
+    async def limited(coin):
+        async with sem:
+            return await one(coin)
+
+    results = await asyncio.gather(*(limited(c) for c in (coins or cfg.coins)))
     return dict(results)

@@ -113,7 +113,8 @@
   /* ── chrome: top bar, f-keys, tape ──────────────────────────────────── */
   function buildFkeys() {
     $("#fkeys").innerHTML = PAGES.map((p) => `<div class="fk ${p.key === A.page ? "on" : ""}" data-p="${p.key}"><span class="n">${p.f}</span>${p.name}</div>`).join("") +
-      ((A.S && A.S.assets) || []).map((a) => `<div class="fk asset" data-c="${esc(a.coin)}">${esc(a.symbol)}</div>`).join("");
+      [...new Set([...((A.S && A.S.positions) || []).map((p) => p.coin), ...((A.S && A.S.orders) || []).map((o) => o.coin)])]
+        .map((c) => `<div class="fk asset" data-c="${esc(c)}" title="offene Position/Order">${esc(c.replace(/^[a-z]+:/, ""))}</div>`).join("");
     document.querySelectorAll(".fk[data-p]").forEach((el) => (el.onclick = () => go(el.dataset.p)));
     document.querySelectorAll(".fk[data-c]").forEach((el) => (el.onclick = () => { A.coin = el.dataset.c; go("ASSET"); }));
   }
@@ -138,13 +139,15 @@
     $("#top-learn").innerHTML = `n=${(b.n_resolved || 0).toLocaleString()} · IC <span class="${cls(b.ic_final)}">${f(b.ic_final, 3)}</span>`;
     const st = info.status || {};
     const ws = info.ws ? ` · WS ${info.ws.connected ? "verbunden" : "getrennt"} (${info.ws.messages} Msg)` : "";
-    status(`${st.msg || ""}${ws} · Bars ${S.counters.bars} · Signale ${S.counters.signals} · Einstiege ${S.counters.entries} · Abgelehnt ${S.counters.rejected} · Stand ${ts(S.t)} UTC`);
+    const mk = info.markets ? ` · Märkte ${info.ready}/${info.markets}` : "";
+    const subs = info.ws && info.ws.subscriptions ? ` · ${info.ws.subscriptions} Abos` : "";
+    status(`${st.msg || ""}${ws}${subs}${mk} · Bars ${S.counters.bars} · Signale ${S.counters.signals} · Einstiege ${S.counters.entries} · Abgelehnt ${S.counters.rejected} · Stand ${ts(S.t)} UTC`);
     if (Date.now() - A.tapeAt > 15000) {
       A.tapeAt = Date.now();
-      const items = S.assets.map((a) => {
-        const ch = a.ctx && isNum(a.ctx.chg_24h) ? a.ctx.chg_24h : null;
-        return `<span><b class="amber">${esc(a.symbol)}</b> ${px(a.px)} <span class="${cls(ch)}">${spct(ch)}</span> <span class="dim">S ${sgn(a.final)}</span></span>`;
-      });
+      const held = new Set(S.positions.map((p) => p.coin));
+      const tape = S.assets.filter((a) => held.has(a.coin)).concat(
+        S.assets.filter((a) => !held.has(a.coin)).sort((x, y) => (y.vol || 0) - (x.vol || 0)).slice(0, 40));
+      const items = tape.map((a) => `<span><b class="${held.has(a.coin) ? "yellow" : "amber"}">${esc(a.symbol)}</b> ${px(a.px)} <span class="${cls(a.chg)}">${spct(a.chg)}</span> <span class="dim">S ${sgn(a.final)}</span></span>`);
       const last = (S.journal || []).filter((j) => ["ENTRY", "EXIT", "LIQ", "RUIN"].includes(j.kind)).slice(-3)
         .map((j) => `<span class="yellow">■ ${esc(j.coin)} ${esc(j.text.slice(0, 120))}</span>`);
       $("#tape-inner").innerHTML = items.concat(last).join("");
@@ -197,7 +200,8 @@
   /* ── page dispatch ──────────────────────────────────────────────────── */
   function onState() {
     updateTop();
-    if (!A.fkBuilt && A.S && A.S.assets) { A.fkBuilt = true; buildFkeys(); }
+    const fkKey = A.S && A.S.positions ? A.S.positions.map((p) => p.coin).concat((A.S.orders || []).map((o) => o.coin)).join(",") : "";
+    if (A.fkKey !== fkKey) { A.fkKey = fkKey; buildFkeys(); }
     render();
   }
   function render() {
@@ -223,42 +227,83 @@
 
   /* ── F1 MONITOR ─────────────────────────────────────────────────────── */
   RENDER.MON = {
-    build: () => panel("watch", "Marktübersicht", "WATCH", "c8 h360", { flush: true }) +
-      panel("acct", "Konto · 100 USD Papierkonto", "ACCT", "c4 h360") +
+    build: () => panel("watch", "Marktübersicht", "WATCH", "c8 h420", { flush: true, right: watchControls() }) +
+      panel("acct", "Konto · 100 USD Papierkonto", "ACCT", "c4 h420") +
       canvasPanel("eq", "Equity-Kurve", "EQ", "c8 h240") +
       panel("pos", "Positionen & Orders", "POS", "c4 h240", { flush: true }) +
-      panel("hm", "Signal-Heatmap (Strategie × Markt)", "HEAT", "c6 h280", { flush: true }) +
+      panel("hm", "Signal-Heatmap · stärkste Signale (Strategie × Markt)", "HEAT", "c6 h280", { flush: true }) +
       panel("jr", "Entscheidungs-Journal", "JRNL", "c6 h280"),
-    update(S) {
+    init() { bindWatchControls(); },
+    async update(S) {
       set("watch", watchTable(S));
       document.querySelectorAll("#pb-watch tr[data-c]").forEach((tr) => (tr.onclick = () => { A.coin = tr.dataset.c; go("ASSET"); }));
+      document.querySelectorAll("#pb-watch th[data-sort]").forEach((th) => (th.onclick = () => {
+        const k = th.dataset.sort;
+        A.wsort = { key: k, dir: A.wsort.key === k ? -A.wsort.dir : -1 };
+        set("watch", watchTable(A.S)); RENDER.MON.update(A.S);
+      }));
       set("acct", acctMetrics(S));
       equityChart(cv("eq"), S.equity, S.account.start);
       setR("eq", `Start ${usd(S.account.start)} · Peak ${usd(S.account.peak)} · MaxDD ${pct(S.account.max_dd, 1)}`);
       set("pos", positionsTable(S, true));
-      set("hm", heatmap(S, true));
+      const sig = await fetchCached("sigtop", "/api/signals?limit=14", 4000);
+      if (sig) { set("hm", heatmap(sig, S, true)); bindRowClicks("#pb-hm"); }
       set("jr", journalHtml((S.journal || []).slice(-60).reverse()));
     },
   };
 
+  const CLS_NAMES = { ALL: "Alle", crypto: "Krypto", equity: "Aktien", etf: "ETF", index: "Indizes", commodity: "Rohstoffe", fx: "FX" };
+  function watchControls() {
+    return `<input class="inp" id="w-q" placeholder="Suche…" style="width:110px">` +
+      `<select id="w-cls">${Object.entries(CLS_NAMES).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select>` +
+      `<select id="w-only"><option value="all">alle</option><option value="sig">nur Signale</option><option value="pos">Positionen</option><option value="open">handelbar</option></select>` +
+      `<select id="w-lim"><option value="60">60</option><option value="120">120</option><option value="9999">alle</option></select>`;
+  }
+  function bindWatchControls() {
+    const on = (id, fn) => { const el = document.getElementById(id); if (el) { el.oninput = el.onchange = fn; } };
+    const q = $("#w-q"); if (q) q.value = A.wq || "";
+    if ($("#w-cls")) $("#w-cls").value = A.wcls || "ALL";
+    if ($("#w-only")) $("#w-only").value = A.wonly || "all";
+    if ($("#w-lim")) $("#w-lim").value = String(A.wlim || 60);
+    on("w-q", (e) => { A.wq = e.target.value.toUpperCase(); RENDER.MON.update(A.S); });
+    on("w-cls", (e) => { A.wcls = e.target.value; RENDER.MON.update(A.S); });
+    on("w-only", (e) => { A.wonly = e.target.value; RENDER.MON.update(A.S); });
+    on("w-lim", (e) => { A.wlim = +e.target.value; RENDER.MON.update(A.S); });
+  }
+  A.wsort = { key: "score", dir: -1 };
+  const SORTERS = {
+    sym: (a) => a.symbol, lev: (a) => a.lev, px: (a) => a.px, chg: (a) => a.chg ?? -9, fund: (a) => a.fund ?? 0,
+    vol: (a) => a.vol ?? 0, oi: (a) => a.oi ?? 0, spr: (a) => a.spread ?? 0, score: (a) => Math.abs(a.final || 0),
+    pup: (a) => a.p_up ?? 0, pwin: (a) => a.pwin ?? -1, st: (a) => a.status, cls: (a) => a.cls,
+  };
   function watchTable(S) {
-    const rows = S.assets.map((a) => {
-      const c = a.ctx || {};
-      const fe = a.features || {};
-      const f8 = isNum(c.funding_h) ? c.funding_h * 8 : null;
-      const reg = a.regime || {};
+    const held = new Set(S.positions.map((p) => p.coin).concat((S.orders || []).map((o) => o.coin)));
+    const th = 0.5 * ((((A.cache.cfg || {}).config || {}).signal || {}).entry_threshold || 0.28);
+    let list = S.assets.filter((a) => (!A.wq || a.coin.toUpperCase().includes(A.wq)) && (!A.wcls || A.wcls === "ALL" || a.cls === A.wcls));
+    if (A.wonly === "sig") list = list.filter((a) => Math.abs(a.final || 0) >= th);
+    if (A.wonly === "pos") list = list.filter((a) => held.has(a.coin));
+    if (A.wonly === "open") list = list.filter((a) => a.tradable !== false && a.ready);
+    const key = SORTERS[A.wsort.key] || SORTERS.score;
+    list.sort((x, y) => { const a = key(x), b = key(y); return (a < b ? -1 : a > b ? 1 : 0) * A.wsort.dir; });
+    list.sort((x, y) => (held.has(y.coin) ? 1 : 0) - (held.has(x.coin) ? 1 : 0));
+    const total = list.length;
+    list = list.slice(0, A.wlim || 60);
+    const rows = list.map((a) => {
+      const f8 = isNum(a.fund) ? a.fund * 8 : null;
       const st = a.status || "";
-      const stc = st.startsWith("LONG") ? "up" : st.startsWith("SHORT") ? "down" : st.startsWith("GESPERRT") ? "mute" : st.startsWith("ORDER") ? "cyan" : "dim";
-      return `<tr class="click" data-c="${esc(a.coin)}"><td class="l"><b class="amber">${esc(a.symbol)}</b></td><td class="l dim">${esc(a.dex)}</td>` +
-        `<td class="yellow">${a.leverage}x</td><td>${px(a.px)}</td><td class="${cls(c.chg_24h)}">${spct(c.chg_24h)}</td>` +
-        `<td class="${cls(-f8)}">${isNum(f8) ? (f8 * 100).toFixed(4) + "%" : "-"}</td><td class="${cls(-(c.funding_h || 0))}">${isNum(c.funding_h) ? pct(c.funding_h * 24 * 365, 1) : "-"}</td>` +
-        `<td>${kusd(c.day_volume)}</td><td>${kusd(c.oi_usd)}</td><td>${f(fe.spread_bps, 1)}</td>` +
-        `<td class="l">${esc(reg.label || "-")}${reg.tradable === false ? ' <span class="tag warn">ZU</span>' : ""}</td>` +
+      const stc = st.startsWith("LONG") ? "up" : st.startsWith("SHORT") ? "down" : st.startsWith("GESPERRT") ? "mute" : st.startsWith("ORDER") || st.startsWith("WARTE") ? "cyan" : "dim";
+      return `<tr class="click" data-c="${esc(a.coin)}"><td class="l"><b class="${held.has(a.coin) ? "yellow" : "amber"}">${esc(a.symbol)}</b></td><td class="l dim">${esc(CLS_NAMES[a.cls] || a.cls)}</td>` +
+        `<td class="yellow">${a.lev}x</td><td>${px(a.px)}</td><td class="${cls(a.chg)}">${spct(a.chg)}</td>` +
+        `<td class="${cls(-f8)}">${isNum(f8) ? (f8 * 100).toFixed(4) + "%" : "-"}</td><td class="${cls(-(a.fund || 0))}">${isNum(a.fund) ? pct(a.fund * 24 * 365, 1) : "-"}</td>` +
+        `<td>${kusd(a.vol)}</td><td>${kusd(a.oi)}</td><td>${f(a.spread, 1)}</td>` +
+        `<td class="l">${esc(a.regime || "-")}${a.tradable === false ? ' <span class="tag warn">ZU</span>' : ""}</td>` +
         `<td>${sbar(a.final)} <span class="${cls(a.final)}">${sgn(a.final)}</span></td><td>${pct(a.p_up, 0)}</td><td>${a.pwin === null || a.pwin === undefined ? "-" : pct(a.pwin, 0)}</td>` +
         `<td class="l ${stc}" title="${esc(st)}">${esc(st.slice(0, 34))}</td></tr>`;
     });
-    return `<table class="t"><thead><tr><th class="l">Markt</th><th class="l">Dex</th><th>Hebel</th><th>Mark</th><th>24h</th><th>Fund 8h</th><th>Fund p.a.</th>` +
-      `<th>Vol 24h</th><th>OI</th><th>Spr bps</th><th class="l">Regime</th><th>Ensemble-Score</th><th>P(↑)</th><th>P(Gew)</th><th class="l">Status</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
+    const h = (k, label, l) => `<th class="${l ? "l" : ""}" data-sort="${k}" style="cursor:pointer">${label}${A.wsort.key === k ? (A.wsort.dir < 0 ? " ▼" : " ▲") : ""}</th>`;
+    return `<table class="t"><thead><tr>${h("sym", "Markt", 1)}${h("cls", "Klasse", 1)}${h("lev", "Hebel")}${h("px", "Mark")}${h("chg", "24h")}${h("fund", "Fund 8h")}<th>Fund p.a.</th>` +
+      `${h("vol", "Vol 24h")}${h("oi", "OI")}${h("spr", "Spr bps")}<th class="l">Regime</th>${h("score", "Ensemble-Score")}${h("pup", "P(↑)")}${h("pwin", "P(Gew)")}${h("st", "Status", 1)}</tr></thead>` +
+      `<tbody>${rows.join("")}</tbody></table>` + (total > list.length ? `<p class="note" style="padding:4px 8px">${list.length} von ${total} Märkten – Filter oder „alle“ wählen.</p>` : "");
   }
 
   function acctMetrics(S) {
@@ -310,23 +355,27 @@
       (compact ? "" : "<th>Abst. Stop</th><th>R</th><th>MAE / MFE</th><th>Funding</th><th>Alter</th>") + `</tr></thead><tbody>${rows.join("")}${orows.join("")}</tbody></table>`;
   }
 
-  function heatmap(S, compact) {
-    const keys = Object.keys((S.assets[0] && S.assets[0].signals) || {});
-    if (!keys.length) return '<p class="dim" style="padding:8px">Warmup – noch keine Signale.</p>';
+  function heatmap(sig, S, compact) {
+    const keys = (sig && sig.keys) || [];
+    if (!keys.length || !sig.rows.length) return '<p class="dim" style="padding:8px">Warmup – noch keine Signale.</p>';
     const w = (S.brain && S.brain.weights) || {};
     const muted = new Set((S.brain && S.brain.muted) || []);
     const head = keys.map((k) => `<th class="rot" title="${esc(stratName(k))} · Gewicht ${pct(w[k], 1)}"><div class="${muted.has(k) ? "mute" : ""}">${esc(compact ? k : stratName(k))}</div></th>`).join("");
-    const rows = S.assets.map((a) => {
-      const cells = keys.map((k) => {
-        const [s, why] = a.signals[k] || [0, ""];
+    const rows = sig.rows.map((r) => {
+      const cells = keys.map((k, i) => {
+        const s = r.s[i];
+        const why = r.why ? r.why[i] : "";
         return `<td style="${heat(s)}" title="${esc(stratName(k))}: ${sgn(s)}\n${esc(why)}\nGewicht ${pct(w[k], 1)}${muted.has(k) ? " (stumm)" : ""}">${isNum(s) && s !== 0 ? Math.round(s * 100) : "·"}</td>`;
       }).join("");
-      return `<tr><td class="l amber">${esc(a.symbol)}</td>${cells}<td style="${heat(a.final)}"><b>${Math.round((a.final || 0) * 100)}</b></td>` +
-        (compact ? "" : `<td>${pct(a.agreement, 0)}</td><td>${pct(a.coverage, 0)}</td><td>${pct(a.p_up, 1)}</td><td>${a.pwin === null || a.pwin === undefined ? "-" : pct(a.pwin, 1)}</td>`) + `</tr>`;
+      return `<tr class="click" data-c="${esc(r.coin)}"><td class="l amber">${esc(r.symbol)}</td>${cells}<td style="${heat(r.final)}"><b>${Math.round((r.final || 0) * 100)}</b></td>` +
+        (compact ? "" : `<td>${pct(r.agreement, 0)}</td><td>${pct(r.coverage, 0)}</td><td>${pct(r.p_up, 1)}</td><td>${r.pwin === null || r.pwin === undefined ? "-" : pct(r.pwin, 1)}</td>`) + `</tr>`;
     }).join("");
     return `<table class="hm"><thead><tr><th class="l">Markt</th>${head}<th class="rot"><div>FINAL</div></th>` +
       (compact ? "" : '<th class="rot"><div>Einigkeit</div></th><th class="rot"><div>Abdeckung</div></th><th class="rot"><div>P(↑) ML</div></th><th class="rot"><div>P(Gewinn)</div></th>') +
       `</tr></thead><tbody>${rows}</tbody></table>`;
+  }
+  function bindRowClicks(sel) {
+    document.querySelectorAll(sel + " tr[data-c]").forEach((tr) => (tr.onclick = () => { A.coin = tr.dataset.c; go("ASSET"); }));
   }
 
   function journalHtml(items) {
@@ -346,11 +395,26 @@
       panel("spec", "Markt & Mechanik", "DES", "c3 h360") +
       panel("atr", "Trades in diesem Markt", "TRD", "c6 h240", { flush: true }) +
       panel("ajr", "Journal (Markt)", "JRNL", "c6 h240"),
+    init() {
+      const S = A.S;
+      setR("chart", `<button class="btn" id="a-prev" title="vorheriger Markt">◀</button>` +
+        `<input class="inp" id="a-pick" list="a-list" placeholder="Markt suchen…" style="width:150px">` +
+        `<datalist id="a-list">${S.assets.map((a) => `<option value="${esc(a.coin)}">${esc(a.symbol)} · ${esc(CLS_NAMES[a.cls] || a.cls)}</option>`).join("")}</datalist>` +
+        `<button class="btn" id="a-next" title="nächster Markt">▶</button>`);
+      const pick = (c) => { if (c) { A.coin = c; A.fetchedAt.asset = 0; render(); } };
+      $("#a-pick").onchange = (e) => pick(findCoin(e.target.value));
+      const step = (d) => {
+        const order = A.S.assets.slice().sort((x, y) => (y.vol || 0) - (x.vol || 0)).map((a) => a.coin);
+        const i = order.indexOf(A.coin);
+        pick(order[(i + d + order.length) % order.length]);
+      };
+      $("#a-prev").onclick = () => step(-1);
+      $("#a-next").onclick = () => step(1);
+    },
     async update(S) {
       const coin = A.coin;
-      const sel = S.assets.map((a) => `<span class="tag ${a.coin === coin ? "warn" : ""}" style="cursor:pointer" data-c="${esc(a.coin)}">${esc(a.symbol)}</span>`).join(" ");
-      setR("chart", sel);
-      document.querySelectorAll("#pr-chart [data-c]").forEach((el) => (el.onclick = () => { A.coin = el.dataset.c; A.fetchedAt["asset"] = 0; render(); }));
+      const pk = $("#a-pick");
+      if (pk && document.activeElement !== pk) pk.value = coin;
       const key = "asset";
       if (A.cache.assetCoin !== coin) { A.fetchedAt[key] = 0; A.cache.assetCoin = coin; }
       const d = await fetchCached(key, "/api/asset/" + encodeURIComponent(coin), 2000);
@@ -405,7 +469,7 @@
 
   function bookHtml(d) {
     const b = d.book || { bids: [], asks: [] };
-    if (!b.bids.length && !b.asks.length) return `<p class="dim" style="padding:8px">Kein Live-Orderbuch (Backtest-Kalibrierung: Spread ${f((d.calib || {}).spread_bps, 1)} bps, Tiefe ±2 % ${kusd((d.calib || {}).depth_usd)}).</p>`;
+    if (!b.bids.length && !b.asks.length) return `<p class="dim" style="padding:8px">Orderbuch wird abonniert … (Live-Bücher gibt es für die ${((A.S.info || {}).focus || []).length || "aktuellen"} Fokus-Märkte: Positionen, Orders, stärkste Signale und den hier geöffneten Markt).</p>`;
     const asks = b.asks.slice(0, 14).reverse(), bids = b.bids.slice(0, 14);
     const mx = Math.max(...asks.concat(bids).map((x) => x[0] * x[1]), 1);
     let cumA = 0, cumB = 0;
@@ -458,7 +522,7 @@
         ["Initial-Margin", pct(1 / lev, 2)], ["Maintenance", pct(mm, 2) + " = ½ IM@max"], ["Liq-Abstand Long", pct(1 - liqL, 2)],
         ["Liq-Abstand Short", pct(liqS - 1, 2)], ["Taker / Maker", `${pct(s.taker_fee, 4)} / ${pct(s.maker_fee, 4)}`],
         ["Growth-Mode", s.growth_mode ? '<span class="tag ok">an (−90 %)</span>' : "aus"], ["Nur Isolated", s.only_isolated ? "ja" : "nein"],
-        ["Größen-Dezimalen", s.sz_decimals], ["Aktie (US-Session)", s.is_equity ? "ja" : "nein"], ["Mark / Oracle", `${px(c.mark)} / ${px(c.oracle)}`],
+        ["Größen-Dezimalen", s.sz_decimals], ["Klasse", esc(s.asset_class)], ["Mark / Oracle", `${px(c.mark)} / ${px(c.oracle)}`],
         ["Prämie", f((c.premium || 0) * 1e4, 1) + " bps"], ["Funding/h", isNum(c.funding_h) ? (c.funding_h * 100).toFixed(5) + "%" : "-"],
         ["Open Interest", kusd(c.oi_usd)], ["Regime", esc((v.regime || {}).label || "-") + ((v.regime || {}).why ? " · " + esc(v.regime.why) : "")]]
         .map(([k, val]) => `<tr><td class="l dim">${k}</td><td class="wrap" style="text-align:right">${val}</td></tr>`).join("") + `</tbody></table>` +
@@ -477,21 +541,32 @@
 
   /* ── F3 SIGNALE ─────────────────────────────────────────────────────── */
   RENDER.SIG = {
-    build: () => panel("hm2", "Signal-Matrix · alle Strategien × alle Märkte (Hover = Begründung)", "SIGM", "c12 h360", { flush: true }) +
+    build: () => panel("hm2", "Signal-Matrix · stärkste Signale zuerst (Hover = Begründung, Klick = Asset)", "SIGM", "c12 h420", {
+      flush: true, right: `<input class="inp" id="s-q" placeholder="Markt filtern…" style="width:130px"><select id="s-lim"><option value="40">Top 40</option><option value="80">Top 80</option><option value="300">alle</option></select>` }) +
       canvasPanel("rej", "Warum nicht gehandelt? Ablehnungsgründe (kumuliert)", "GATE", "c6 h280") +
       canvasPanel("wgt", "Globale Strategie-Gewichte (Hedge)", "WGT", "c6 h280") +
-      panel("why", "Entscheidungslage je Markt", "WHY", "c12 h360", { flush: true }),
-    update(S) {
+      panel("why", "Entscheidungslage · stärkste Signale", "WHY", "c12 h360", { flush: true }),
+    init() {
+      if ($("#s-q")) { $("#s-q").value = A.sq || ""; $("#s-q").oninput = (e) => { A.sq = e.target.value; A.fetchedAt.sig = 0; RENDER.SIG.update(A.S); }; }
+      if ($("#s-lim")) { $("#s-lim").value = String(A.slim || 40); $("#s-lim").onchange = (e) => { A.slim = +e.target.value; A.fetchedAt.sig = 0; RENDER.SIG.update(A.S); }; }
+    },
+    async update(S) {
       fetchCached("brain", "/api/brain", 10000);
-      set("hm2", heatmap(S, false));
+      const sig = await fetchCached("sig", `/api/signals?limit=${A.slim || 40}&q=${encodeURIComponent(A.sq || "")}`, 3000);
+      if (sig) {
+        set("hm2", heatmap(sig, S, false));
+        bindRowClicks("#pb-hm2");
+        setR("why", `${sig.rows.length} von ${sig.total} Märkten mit Signal-Auswertung`);
+        set("why", `<table class="t"><thead><tr><th class="l">Markt</th><th>FINAL</th><th></th><th class="l">Status / Begründung</th><th class="l">Top-Beiträge (Gewicht × Score)</th></tr></thead><tbody>` +
+          sig.rows.map((r) => `<tr class="click" data-c="${esc(r.coin)}"><td class="l amber">${esc(r.symbol)}</td><td class="${cls(r.final)} b">${sgn(r.final)}</td><td>${sbar(r.final)}</td><td class="l">${esc(r.status)}</td>` +
+            `<td class="l">${(r.contrib || []).map(([k, c]) => `<span class="${cls(c)}">${esc(stratName(k))} ${sgn(c, 3)}</span>`).join(" · ")}</td></tr>`).join("") + `</tbody></table>`);
+        bindRowClicks("#pb-why");
+      }
       const rej = Object.entries(S.rejects || {}).map(([k, v]) => ({ label: k, value: v, color: CH.C.amber }));
       CH.bars(cv("rej"), { items: rej, labelW: 230, fmt: (v) => Math.round(v) + "", empty: "noch keine abgelehnten Signale" });
       const w = (S.brain && S.brain.weights) || {};
       const muted = new Set((S.brain && S.brain.muted) || []);
       CH.bars(cv("wgt"), { items: Object.entries(w).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ label: stratName(k), value: v * 100, color: muted.has(k) ? "#566079" : CH.C.cyan })), labelW: 140, fmt: (v) => v.toFixed(1) + "%" });
-      set("why", `<table class="t"><thead><tr><th class="l">Markt</th><th>FINAL</th><th></th><th class="l">Status / Begründung</th><th class="l">Top-Beiträge (Gewicht × Score)</th></tr></thead><tbody>` +
-        S.assets.map((a) => `<tr><td class="l amber">${esc(a.symbol)}</td><td class="${cls(a.final)} b">${sgn(a.final)}</td><td>${sbar(a.final)}</td><td class="l">${esc(a.status)}</td>` +
-          `<td class="l">${(a.contrib || []).slice(0, 5).map(([k, c]) => `<span class="${cls(c)}">${esc(stratName(k))} ${sgn(c, 3)}</span>`).join(" · ")}</td></tr>`).join("") + `</tbody></table>`);
     },
   };
 
@@ -788,8 +863,8 @@
       const cfg = await fetchCached("cfg", "/api/config", 60000);
       if (!cfg) return;
       const sp = cfg.specs || {};
-      set("specs", `<table class="t"><thead><tr><th class="l">Markt</th><th class="l">Dex</th><th>Hebel</th><th>Börse max</th><th>Maint.</th><th>Taker</th><th>Maker</th><th>Fee-Scale</th><th>Growth</th><th>Isolated</th><th>szDec</th><th class="l">Aktie</th><th class="l">Hinweis</th></tr></thead><tbody>` +
-        Object.values(sp).map((s) => `<tr><td class="l amber">${esc(s.coin)}</td><td class="l">${esc(s.dex || "main")}</td><td class="yellow b">${s.leverage}x</td><td>${s.exchange_max_leverage}x</td><td>${pct(s.maint_rate, 2)}</td><td>${pct(s.taker_fee, 4)}</td><td>${pct(s.maker_fee, 4)}</td><td>${s.deployer_fee_scale}</td><td>${s.growth_mode ? "an" : "-"}</td><td>${s.only_isolated ? "nur" : "-"}</td><td>${s.sz_decimals}</td><td class="l">${s.is_equity ? "ja" : "-"}</td><td class="l dim">${esc(s.note)}</td></tr>`).join("") + `</tbody></table>`);
+      set("specs", `<table class="t"><thead><tr><th class="l">Markt</th><th class="l">Dex</th><th>Hebel</th><th>Börse max</th><th>Maint.</th><th>Taker</th><th>Maker</th><th>Fee-Scale</th><th>Growth</th><th>Isolated</th><th>szDec</th><th class="l">Klasse</th><th class="l">Hinweis</th></tr></thead><tbody>` +
+        Object.values(sp).map((s) => `<tr><td class="l amber">${esc(s.coin)}</td><td class="l">${esc(s.dex || "main")}</td><td class="yellow b">${s.leverage}x</td><td>${s.exchange_max_leverage}x</td><td>${pct(s.maint_rate, 2)}</td><td>${pct(s.taker_fee, 4)}</td><td>${pct(s.maker_fee, 4)}</td><td>${s.deployer_fee_scale}</td><td>${s.growth_mode ? "an" : "-"}</td><td>${s.only_isolated ? "nur" : "-"}</td><td>${s.sz_decimals}</td><td class="l">${esc(s.asset_class)}</td><td class="l dim">${esc(s.note)}</td></tr>`).join("") + `</tbody></table>`);
       set("cal", `<table class="t"><thead><tr><th class="l">Markt</th><th>Spread bps</th><th>Tiefe ±2 %</th><th>Bid-Tiefe</th><th>Ask-Tiefe</th><th>Imbalance</th><th>Level</th></tr></thead><tbody>` +
         Object.entries(cfg.calib || {}).map(([c, k]) => `<tr><td class="l amber">${esc(c)}</td><td>${f(k.spread_bps, 2)}</td><td>${kusd(k.depth_usd)}</td><td>${kusd(k.bid_depth)}</td><td>${kusd(k.ask_depth)}</td><td class="${cls(k.imbalance)}">${sgn(k.imbalance)}</td><td>${k.levels ?? "-"}</td></tr>`).join("") + `</tbody></table>`);
       set("cfgd", `<pre style="margin:0;color:var(--text)">${esc(JSON.stringify(cfg.config, null, 2))}</pre>`);

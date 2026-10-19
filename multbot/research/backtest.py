@@ -42,7 +42,7 @@ def prepare_features(history: dict[str, History], specs: dict[str, MarketSpec], 
             continue
         a = arrays_from_bars(h.bars)
         fr, pr = h.funding_aligned(a["t"])
-        f = compute_features(a, ims, fr, pr, specs[coin].is_equity)
+        f = compute_features(a, ims, fr, pr)
         out[coin] = {"a": a, "f": f, "hist": h}
     return out
 
@@ -71,6 +71,7 @@ def run_backtest(cfg: Config, specs: dict[str, MarketSpec], history: dict[str, H
     train_end_t = times[min(int(len(times) * tf), len(times) - 1)] if tf > 0 else times[0]
     index = {c: {int(t): i for i, t in enumerate(d["a"]["t"])} for c, d in data.items()}
     learned_until = dict(brain.trained_until) if skip_learned else {}
+    spread = {c: float((calib or {}).get(c, {}).get("spread_bps", cfg.execution.synthetic_spread_bps)) for c in data}
     n_steps = len(times)
     for step, t in enumerate(times):
         t_close = t + ims
@@ -89,7 +90,9 @@ def run_backtest(cfg: Config, specs: dict[str, MarketSpec], history: dict[str, H
                     rate = float(f["funding_h"][i])
                 engine.on_funding(coin, rate, float(c), t_close)
             learn = not (skip_learned and t_close <= learned_until.get(coin, 0))
-            engine.on_bar_close(coin, t_close, row(f, i), i + 1, trade=trade and t >= train_end_t, learn=learn)
+            r = row(f, i)
+            r["spread_bps"] = spread[coin]
+            engine.on_bar_close(coin, t_close, r, i + 1, trade=trade and t >= train_end_t, learn=learn)
         engine.mark_equity(t_close)
         if progress and step % 250 == 0:
             progress(step / n_steps)

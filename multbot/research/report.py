@@ -129,18 +129,34 @@ def build_report(cfg: Config, specs: dict[str, MarketSpec], history: dict[str, H
     }
 
 
+def select_markets(specs: dict[str, MarketSpec], top: int = 0, coins: list[str] | None = None) -> dict:
+    """Research universe: explicit coins, else the ``top`` markets by 24h volume (0 = all)."""
+    if coins:
+        wanted = {c.strip() for c in coins if c.strip()}
+        alias = {s.symbol.upper(): c for c, s in specs.items()}
+        picked = [c if c in specs else alias.get(c.upper()) for c in wanted]
+        return {c: specs[c] for c in specs if c in picked}
+    if top and len(specs) > top:
+        keep = set(sorted(specs, key=lambda c: -specs[c].day_volume)[:top])
+        return {c: s for c, s in specs.items() if c in keep}
+    return specs
+
+
 async def run_research(cfg: Config, interval: str | None = None, n_bars: int | None = None,
-                       out_name: str = "research_latest.json", progress=None) -> dict:
+                       out_name: str = "research_latest.json", progress=None, top: int | None = None,
+                       coins: list[str] | None = None) -> dict:
     if interval:
         cfg.signal.interval = interval
     rest = HLRest(cfg.api_url)
     try:
-        metas = {}
+        metas, ctxs = {}, {}
         for dex in cfg.dexes:
-            metas[dex], _ = await rest.meta_and_ctxs(dex)
-        specs = build_specs(cfg, metas)
-        history = await fetch_all(cfg, rest, cfg.signal.interval, n_bars or cfg.learning.history_bars)
-        calib = await calibrate_costs(rest, cfg.coins)
+            metas[dex], ctxs[dex] = await rest.meta_and_ctxs(dex)
+        specs = select_markets(build_specs(cfg, metas, ctxs), cfg.research.max_markets if top is None else top, coins)
+        log.info("Research-Universum: %d Märkte", len(specs))
+        history = await fetch_all(cfg, rest, cfg.signal.interval, n_bars or cfg.learning.history_bars,
+                                  coins=list(specs))
+        calib = await calibrate_costs(rest, list(specs))
     finally:
         await rest.close()
     brain = Brain(cfg, list(specs))

@@ -3,21 +3,309 @@
 #  Alle Trades werden SIMULIERT. Es werden niemals echte Orders gesendet.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Deine Märkte + Hebel. "leverage: max" = immer den maximalen Hebel der Börse
-# nehmen (wird beim Start live aus der Hyperliquid-Meta geladen und gegen
-# deinen Wert geprüft). Eine Zahl erzwingt genau diesen Hebel (gedeckelt auf
-# das Börsen-Maximum).
+# Hebel: "max" = immer der maximale Hebel der Börse (live aus der Hyperliquid-Meta).
+# Einzelne Märkte können abweichen:  - { coin: "BTC", leverage: 20 }
+default_leverage: max
+
+# Märkte. Schreibweise wie auf Hyperliquid: Krypto ohne Präfix (BTC), HIP-3-Märkte
+# mit Dex-Präfix (xyz:TSLA). Unbekannte/delistete Märkte werden beim Start
+# übersprungen und im Log gemeldet. Der Kommentar zeigt den Hebel laut deiner Liste.
 assets:
-  - { coin: "xyz:GEV",   leverage: 10 }
-  - { coin: "HMSTR",     leverage: 3 }
-  - { coin: "xyz:EBAY",  leverage: 10 }
-  - { coin: "xyz:SHEIN", leverage: 10 }
-  - { coin: "TNSR",      leverage: 3 }
-  - { coin: "xyz:LYTE",  leverage: 10 }
-  - { coin: "xyz:OURA",  leverage: 5 }
-  - { coin: "xyz:XBI",   leverage: 10 }
-  - { coin: "xyz:KSTR",  leverage: 10 }
-  - { coin: "xyz:BIRD",  leverage: 10 }
+  # ── deine ersten 10 Märkte ──────────────────────────────────────────────
+  - xyz:GEV         # 10x · Aktie
+  - HMSTR           # 3x · Krypto
+  - xyz:EBAY        # 10x · Aktie
+  - xyz:SHEIN       # 10x · Aktie
+  - TNSR            # 3x · Krypto
+  - xyz:LYTE        # 10x · Aktie
+  - xyz:OURA        # 5x · Aktie
+  - xyz:XBI         # 10x · ETF
+  - xyz:KSTR        # 10x · Aktie
+  - xyz:BIRD        # 10x · Aktie
+  # ── neu: 279 Märkte, sortiert nach 24h-Volumen (Stand deiner Liste) ──────
+  - BTC             # 40x · Krypto
+  - ETH             # 25x · Krypto
+  - SOL             # 20x · Krypto
+  - HYPE            # 10x · Krypto
+  - xyz:XYZ100      # 30x · Index
+  - ZEC             # 10x · Krypto
+  - PUMP            # 10x · Krypto
+  - xyz:SP500       # 50x · Index
+  - NEAR            # 10x · Krypto
+  - xyz:SKHX        # 10x · Aktie
+  - xyz:MU          # 10x · Aktie
+  - xyz:TSLA        # 20x · Aktie
+  - xyz:SNDK        # 10x · Aktie
+  - XMR             # 5x · Krypto
+  - XRP             # 20x · Krypto
+  - xyz:CL          # 20x · Rohstoff
+  - xyz:DRAM        # 20x · Aktie
+  - xyz:SOXL        # 10x · ETF
+  - xyz:BRENTOIL    # 20x · Rohstoff
+  - xyz:SKHY        # 10x · Aktie
+  - xyz:SMSN        # 10x · Aktie
+  - ENA             # 10x · Krypto
+  - xyz:NVDA        # 20x · Aktie
+  - WLD             # 10x · Krypto
+  - xyz:SPCX        # 20x · Aktie
+  - xyz:EWY         # 20x · ETF
+  - xyz:INTC        # 10x · Aktie
+  - LIT             # 5x · Krypto
+  - SUI             # 10x · Krypto
+  - ZRO             # 5x · Krypto
+  - INJ             # 5x · Krypto
+  - xyz:SILVER      # 25x · Rohstoff
+  - UNI             # 10x · Krypto
+  - STRK            # 5x · Krypto
+  - xyz:AAPL        # 20x · Aktie
+  - PONS            # 3x · Krypto
+  - FARTCOIN        # 10x · Krypto
+  - TIA             # 5x · Krypto
+  - ARB             # 10x · Krypto
+  - XPL             # 10x · Krypto
+  - kPEPE           # 10x · Krypto
+  - ONDO            # 10x · Krypto
+  - xyz:AMD         # 10x · Aktie
+  - xyz:GOLD        # 25x · Rohstoff
+  - LINK            # 10x · Krypto
+  - xyz:CRCL        # 10x · Aktie
+  - xyz:KORU        # 10x · ETF
+  - xyz:GOOGL       # 20x · Aktie
+  - xyz:MSFT        # 20x · Aktie
+  - TAO             # 5x · Krypto
+  - VVV             # 3x · Krypto
+  - MON             # 5x · Krypto
+  - CASHCAT         # 3x · Krypto
+  - DOGE            # 10x · Krypto
+  - SAND            # 5x · Krypto
+  - BNB             # 10x · Krypto
+  - AAVE            # 10x · Krypto
+  - xyz:CBRS        # 10x · Aktie
+  - xyz:META        # 20x · Aktie
+  - CRV             # 10x · Krypto
+  - xyz:MSTR        # 10x · Aktie
+  - xyz:AMZN        # 20x · Aktie
+  - SPX             # 5x · Krypto
+  - AERO            # 3x · Krypto
+  - LTC             # 10x · Krypto
+  - GRASS           # 3x · Krypto
+  - xyz:EUR         # 50x · FX
+  - xyz:NBIS        # 10x · Aktie
+  - xyz:CRWV        # 10x · Aktie
+  - AVAX            # 10x · Krypto
+  - HBAR            # 5x · Krypto
+  - xyz:MRVL        # 10x · Aktie
+  - xyz:COPPER      # 20x · Rohstoff
+  - xyz:WDC         # 10x · Aktie
+  - ADA             # 10x · Krypto
+  - xyz:HOOD        # 10x · Aktie
+  - xyz:PLTR        # 10x · Aktie
+  - xyz:KIOXIA      # 10x · Aktie
+  - xyz:IREN        # 10x · Aktie
+  - xyz:MRNA        # 10x · Aktie
+  - xyz:CXMT        # 10x · Aktie
+  - xyz:ORCL        # 10x · Aktie
+  - BCH             # 10x · Krypto
+  - ASTER           # 5x · Krypto
+  - FET             # 5x · Krypto
+  - USELESS         # 3x · Krypto
+  - DOT             # 10x · Krypto
+  - xyz:AVGO        # 10x · Aktie
+  - xyz:NATGAS      # 10x · Rohstoff
+  - GRAM            # 5x · Krypto
+  - APT             # 10x · Krypto
+  - FIL             # 5x · Krypto
+  - xyz:GME         # 10x · Aktie
+  - TRUMP           # 10x · Krypto
+  - xyz:LITE        # 10x · Aktie
+  - xyz:DELL        # 10x · Aktie
+  - PAXG            # 10x · Krypto
+  - ICP             # 5x · Krypto
+  - CHIP            # 3x · Krypto
+  - xyz:COIN        # 10x · Aktie
+  - xyz:BE          # 10x · Aktie
+  - PYTH            # 5x · Krypto
+  - TRX             # 10x · Krypto
+  - xyz:AMAT        # 10x · Aktie
+  - ETHFI           # 5x · Krypto
+  - PENGU           # 5x · Krypto
+  - xyz:NFLX        # 10x · Aktie
+  - xyz:JPY         # 50x · FX
+  - xyz:ARM         # 10x · Aktie
+  - xyz:ASML        # 10x · Aktie
+  - xyz:SNXX        # 10x · Aktie
+  - xyz:JP225       # 20x · Index
+  - SYRUP           # 3x · Krypto
+  - XLM             # 5x · Krypto
+  - JUP             # 10x · Krypto
+  - NIL             # 3x · Krypto
+  - xyz:RKLB        # 10x · Aktie
+  - kBONK           # 10x · Krypto
+  - STBL            # 3x · Krypto
+  - xyz:AAOI        # 10x · Aktie
+  - W               # 5x · Krypto
+  - xyz:KR200       # 20x · Index
+  - xyz:BB          # 10x · Aktie
+  - MORPHO          # 5x · Krypto
+  - PENDLE          # 5x · Krypto
+  - S               # 5x · Krypto
+  - SEI             # 5x · Krypto
+  - WIF             # 5x · Krypto
+  - ZK              # 5x · Krypto
+  - MET             # 3x · Krypto
+  - MEGA            # 3x · Krypto
+  - OP              # 5x · Krypto
+  - PURR            # 3x · Krypto
+  - ALT             # 3x · Krypto
+  - ALGO            # 5x · Krypto
+  - LDO             # 5x · Krypto
+  - EIGEN           # 5x · Krypto
+  - xyz:PURRDAT     # 10x · Aktie
+  - GMX             # 3x · Krypto
+  - CC              # 3x · Krypto
+  - xyz:QCOM        # 10x · Aktie
+  - SKR             # 3x · Krypto
+  - xyz:SMH         # 20x · ETF
+  - STX             # 5x · Krypto
+  - POL             # 5x · Krypto
+  - WLFI            # 5x · Krypto
+  - RENDER          # 5x · Krypto
+  - APE             # 5x · Krypto
+  - VIRTUAL         # 5x · Krypto
+  - xyz:BABA        # 10x · Aktie
+  - KAITO           # 5x · Krypto
+  - AZTEC           # 3x · Krypto
+  - xyz:TSM         # 10x · Aktie
+  - CFX             # 5x · Krypto
+  - MNT             # 5x · Krypto
+  - xyz:STRC        # 10x · Aktie
+  - xyz:PLATINUM    # 20x · Rohstoff
+  - RSR             # 3x · Krypto
+  - xyz:EWJ         # 20x · ETF
+  - kSHIB           # 10x · Krypto
+  - ENS             # 5x · Krypto
+  - ATOM            # 5x · Krypto
+  - JTO             # 5x · Krypto
+  - xyz:IBM         # 10x · Aktie
+  - SKY             # 3x · Krypto
+  - xyz:EWZ         # 20x · ETF
+  - BSV             # 3x · Krypto
+  - APEX            # 3x · Krypto
+  - 2Z              # 3x · Krypto
+  - IO              # 3x · Krypto
+  - xyz:ZHIPU       # 10x · Aktie
+  - REZ             # 3x · Krypto
+  - RUNE            # 5x · Krypto
+  - xyz:MINIMAX     # 10x · Aktie
+  - DASH            # 5x · Krypto
+  - MINA            # 3x · Krypto
+  - xyz:HYUNDAI     # 10x · Aktie
+  - IMX             # 5x · Krypto
+  - POPCAT          # 3x · Krypto
+  - NXPC            # 3x · Krypto
+  - SOPH            # 3x · Krypto
+  - INIT            # 3x · Krypto
+  - CAKE            # 3x · Krypto
+  - LINEA           # 3x · Krypto
+  - BERA            # 5x · Krypto
+  - xyz:CRWD        # 10x · Aktie
+  - ETC             # 5x · Krypto
+  - AR              # 5x · Krypto
+  - xyz:UNITREE     # 10x · Aktie
+  - KAS             # 3x · Krypto
+  - DYDX            # 5x · Krypto
+  - BLUR            # 3x · Krypto
+  - DYM             # 3x · Krypto
+  - xyz:EWT         # 20x · ETF
+  - xyz:BMNR        # 10x · Aktie
+  - 0G              # 3x · Krypto
+  - xyz:RIVN        # 10x · Aktie
+  - xyz:SOFTBANK    # 10x · Aktie
+  - IOTA            # 3x · Krypto
+  - USUAL           # 3x · Krypto
+  - BOME            # 3x · Krypto
+  - xyz:QNT         # 10x · Aktie
+  - SUSHI           # 3x · Krypto
+  - SUPER           # 3x · Krypto
+  - MELANIA         # 3x · Krypto
+  - BABY            # 3x · Krypto
+  - xyz:USAR        # 10x · Aktie
+  - GRIFFAIN        # 3x · Krypto
+  - AVNT            # 5x · Krypto
+  - PEOPLE          # 3x · Krypto
+  - ZEN             # 5x · Krypto
+  - BRETT           # 3x · Krypto
+  - xyz:HIMS        # 10x · Aktie
+  - GALA            # 3x · Krypto
+  - FOGO            # 3x · Krypto
+  - TURBO           # 3x · Krypto
+  - xyz:NOW         # 10x · Aktie
+  - COMP            # 5x · Krypto
+  - ZORA            # 3x · Krypto
+  - MANTA           # 3x · Krypto
+  - xyz:LLY         # 10x · Aktie
+  - GOAT            # 3x · Krypto
+  - MERL            # 3x · Krypto
+  - ACE             # 3x · Krypto
+  - ANIME           # 3x · Krypto
+  - ORDI            # 3x · Krypto
+  - HYPER           # 3x · Krypto
+  - SNX             # 3x · Krypto
+  - xyz:GIGADEV     # 10x · Aktie
+  - AXS             # 5x · Krypto
+  - PNUT            # 3x · Krypto
+  - BANANA          # 3x · Krypto
+  - GMT             # 3x · Krypto
+  - TRB             # 3x · Krypto
+  - xyz:XLE         # 20x · ETF
+  - YGG             # 3x · Krypto
+  - WCT             # 3x · Krypto
+  - xyz:BOT         # 10x · Aktie
+  - ZETA            # 3x · Krypto
+  - XAI             # 3x · Krypto
+  - STABLE          # 3x · Krypto
+  - xyz:NOK         # 10x · Aktie
+  - kNEIRO          # 3x · Krypto
+  - xyz:PALLADIUM   # 20x · Rohstoff
+  - POLYX           # 3x · Krypto
+  - MOVE            # 3x · Krypto
+  - BIO             # 3x · Krypto
+  - HEMI            # 3x · Krypto
+  - AIXBT           # 3x · Krypto
+  - ME              # 3x · Krypto
+  - CELO            # 3x · Krypto
+  - MEME            # 3x · Krypto
+  - kLUNC           # 3x · Krypto
+  - LAYER           # 3x · Krypto
+  - xyz:HO          # 10x · Rohstoff
+  - xyz:URNM        # 10x · ETF
+  - xyz:RDDT        # 10x · Aktie
+  - xyz:SHAZ        # 10x · Aktie
+  - SAGA            # 3x · Krypto
+  - kFLOKI          # 5x · Krypto
+  - MOODENG         # 3x · Krypto
+  - UMA             # 3x · Krypto
+  - BIGTIME         # 3x · Krypto
+  - NEO             # 5x · Krypto
+  - xyz:NET         # 10x · Aktie
+  - xyz:NCLD        # 10x · Aktie
+  - GAS             # 3x · Krypto
+  - RESOLV          # 3x · Krypto
+  - xyz:MAGS        # 10x · ETF
+  - PROVE           # 3x · Krypto
+  - xyz:COST        # 20x · Aktie
+  - xyz:GLW         # 10x · Aktie
+  - xyz:DKNG        # 10x · Aktie
+  - xyz:CVX         # 10x · Aktie
+  - xyz:BX          # 10x · Aktie
+  - xyz:LRCX        # 10x · Aktie
+  - xyz:ZM          # 10x · Aktie
+  - NOT             # 3x · Krypto
+  - xyz:GBP         # 50x · FX
+
+universe:
+  min_day_volume_usd: 0         # Märkte mit weniger 24h-Volumen ignorieren (0 = alle)
+  max_markets: 0                # nur die N volumenstärksten handeln (0 = alle)
 
 account:
   starting_balance: 100.0       # Startkapital in USD
@@ -25,10 +313,10 @@ account:
   ruin_threshold: 5.0           # unter diesem Equity-Wert gilt das Konto als ruiniert
 
 risk:
-  max_open_positions: 4
-  base_margin_pct: 0.18         # Basis-Margin pro Trade (Anteil am Equity), wird nach Überzeugung skaliert
-  min_margin_pct: 0.06
-  max_margin_pct: 0.35
+  max_open_positions: 6         # bei ~290 Märkten etwas mehr gleichzeitige Positionen
+  base_margin_pct: 0.12         # Basis-Margin pro Trade (Anteil am Equity), wird nach Überzeugung skaliert
+  min_margin_pct: 0.04
+  max_margin_pct: 0.25
   max_total_margin_pct: 0.90    # max. gebundene Margin über alle Positionen
   min_notional: 10.0            # Hyperliquid-Mindestordergröße
   max_spread_bps: 80            # kein Einstieg bei zu breitem Spread
@@ -40,8 +328,12 @@ risk:
   max_hold_bars: 72             # Zeit-Stop
   stop_liq_frac: 0.60           # Stop liegt spätestens bei 60 % der Distanz zum Liquidationspreis
   daily_loss_pause_pct: 0.45    # Einstiegs-Pause, wenn Equity in 24 h um 45 % fällt
-  corr_limit: 0.85              # keine zwei hochkorrelierten Positionen in dieselbe Richtung
-  skip_stale_markets: true      # kein Einstieg, wenn der Markt "schläft" (Oracle eingefroren, keine Trades)
+  corr_limit: 0.75              # keine zwei hochkorrelierten Positionen in dieselbe Richtung
+  max_same_class_side: 3        # max. Positionen je Asset-Klasse und Richtung (z. B. 3× Aktie long)
+  min_stop_pct: 0.004           # Stop mindestens 0,4 % entfernt (ruhige Nachtstunden → sonst Rausch-Stops)
+  skip_stale_markets: true      # kein Einstieg, wenn der Markt "schläft" (eingefrorene Bars)
+  max_oracle_age_min: 20        # kein Einstieg, wenn sich das Oracle so lange nicht bewegt hat
+                                # (Börse des Basiswerts geschlossen: US/KR/JP/CN-Aktien, Rohstoffe am WE …)
   funding_guard_bps: 6.0        # kein Einstieg kurz vor Funding, wenn Funding stark gegen uns läuft
 
 signal:
@@ -63,7 +355,8 @@ learning:
   l2: 0.0005
   meta_min_samples: 200
   pretrain_on_history: true     # beim Start auf Historie vortrainieren (nur neue Bars)
-  history_bars: 4000            # wie viele Bars Historie geladen werden
+  live_history_bars: 600        # Live-Start: Historie je Markt (wird im Hintergrund nach Volumen geladen)
+  history_bars: 4000            # Research: Historie je Markt
   persist_every_s: 60
 
 fees:
@@ -80,16 +373,19 @@ execution:
                                 # "taker": sofortiger Market-Einstieg durchs Orderbuch
   maker_timeout_bars: 2         # unausgeführte Limit-Order nach n Bars stornieren
   tp_maker: true                # Take-Profit als ruhende Limit-Order
+  book_focus: 40                # Live-Orderbücher werden nur für so viele "Fokus"-Märkte abonniert
+                                # (Positionen, Orders, Kandidaten, Dashboard) – Hyperliquid-Limit 1000 Abos
 
 research:
   train_frac: 0.40              # Walk-Forward: erste 40 % nur lernen, Rest out-of-sample handeln
+  max_markets: 40               # Research auf den N volumenstärksten Märkten (0 = alle, dauert lange)
   mc_paths: 3000
   mc_trades: 200
 
 web:
   host: "127.0.0.1"
   port: 8050
-  push_interval_s: 1.0
+  push_interval_s: 1.5
 
 data_dir: "data"
 api_url: "https://api.hyperliquid.xyz"

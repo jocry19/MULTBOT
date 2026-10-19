@@ -63,27 +63,47 @@ python -m multbot markets      # Live-Tabelle deiner Märkte (Hebel, Mark, Fundi
 python -m multbot run --app    # Live-Papierhandel, Terminal als App-Fenster (http://127.0.0.1:8050)
 python -m multbot run --open   # dasselbe im normalen Browser-Tab
 python -m multbot shortcut     # Desktop-Verknüpfung anlegen
-python -m multbot research     # Walk-Forward-Backtest, Monte Carlo, Signal-Forschung
-python -m multbot sim --open   # Offline-Simulation (synthetischer Markt im Zeitraffer)
+python -m multbot research     # Walk-Forward-Backtest auf den 40 volumenstärksten Märkten
+python -m multbot research --top 0              # … auf allen Märkten (dauert beim ersten Mal lange)
+python -m multbot research --coins BTC,ETH,xyz:TSLA
+python -m multbot sim --open --markets 30       # Offline-Simulation (synthetischer Markt im Zeitraffer)
 python -m multbot report       # Kontoübersicht aus der Datenbank
 ```
 
-Beim ersten Start von `run` lädt der Bot etwa 14 Tage 5-Minuten-Historie und das Funding. Er misst die
-Kosten in den aktuellen Orderbüchern und trainiert den kompletten Lern-Stack mit einem Walk-Forward-Backtest
-vor. Danach läuft er live über den Hyperliquid-WebSocket. Konto, Lernstand und Journal werden in `data/`
-gespeichert. Ein Neustart macht an derselben Stelle weiter.
+Beim Start von `run` ist das Terminal sofort da, und der WebSocket läuft ab der ersten Sekunde. Die Historie
+(600 Kerzen je Markt) lädt der Bot im Hintergrund, nach Priorität: offene Positionen zuerst, dann nach
+24h-Volumen. Jeder Markt wird nach dem Laden einzeln vortrainiert und ist dann „bereit“. Bei 289 Märkten
+dauert das beim ersten Start einige Minuten, danach nur Sekunden, weil die Historie zwischengespeichert wird.
+Konto, Lernstand und Journal liegen in `data/`. Ein Neustart macht an derselben Stelle weiter.
 
 ## Deine Märkte (config.yaml)
 
-| Markt | Dex | Hebel |
-|---|---|---|
-| xyz:GEV, xyz:EBAY, xyz:SHEIN, xyz:LYTE, xyz:XBI, xyz:KSTR, xyz:BIRD | xyz (HIP-3) | 10x |
-| xyz:OURA | xyz (HIP-3) | 5x |
-| HMSTR, TNSR | main | 3x |
+**289 Märkte**, alle live gegen die Hyperliquid-Meta geprüft. Jeder handelt mit dem Börsenmaximum als Hebel
+(3x–50x), und deine Hebel-Angaben stimmen alle mit dem Maximum überein.
 
-Märkte und Hebel stehen in `config.yaml`. Mit `leverage: max` nimmt der Bot automatisch das aktuelle
-Börsenmaximum. Eine Zahl wird gegen das Maximum geprüft und notfalls gedeckelt. Alle anderen Parameter
-(Risiko, Signale, Lernen, Ausführung) sind dort ebenfalls dokumentiert.
+| Gruppe | Anzahl | Beispiele | Hebel |
+|---|---|---|---|
+| Krypto (Hyperliquid main) | 178 | BTC 40x, ETH 25x, SOL/XRP 20x, HYPE 10x, … | 3x–40x |
+| Aktien & ETFs (`xyz`) | 95 | TSLA, NVDA, MU, SNDK, AAPL, SOXL, EWY, … | 5x–20x |
+| Indizes (`xyz`) | 4 | SP500 50x, XYZ100 30x, JP225, KR200 | 20x–50x |
+| Rohstoffe (`xyz`) | 9 | GOLD, SILVER, CL, BRENTOIL, NATGAS, COPPER, … | 10x–25x |
+| FX (`xyz`) | 3 | EUR, JPY, GBP | 50x |
+
+In `config.yaml` steht einfach eine Liste (`- BTC`, `- xyz:TSLA`). `default_leverage: max` gilt für alle
+Märkte, einzelne können abweichen (`- { coin: "BTC", leverage: 20 }`). Unbekannte oder delistete Märkte
+werden beim Start übersprungen und gemeldet. Mit `universe.min_day_volume_usd` und
+`universe.max_markets` kannst du das Universum verkleinern.
+
+**So bleibt der Bot bei ~290 Märkten schnell und innerhalb der Hyperliquid-Limits** (1200 Gewicht/min REST,
+1000 WebSocket-Abos):
+
+- Mark-Preis, Funding, OI und Trades kommen per WebSocket für alle Märkte.
+- Orderbücher abonniert er nur für die **40 Fokus-Märkte**: Positionen, Orders, die stärksten Signale und
+  den Markt, der gerade im Terminal offen ist. Zusammen sind das etwa 620 Abos.
+- Hat ein starkes Signal noch kein Live-Buch, abonniert der Bot es zuerst und steigt ein, sobald das echte
+  Orderbuch da ist.
+- Kerzenschlüsse für alle Märkte werden gestaffelt verarbeitet. Der Rate-Limiter zählt auch das
+  Zusatzgewicht großer Abfragen mit.
 
 ---
 
@@ -136,8 +156,12 @@ Hyperliquid WS/REST ─► Mark-Preis-Kerzen + Orderbuch + Trades + Funding/OI
   - Maker-Einstiege (Standard) setzen ein Limit am Best-Bid bzw. Best-Ask. Gefüllt wird nur, wenn der Markt
     *durch* den Preis handelt. So bildet die Simulation Adverse Selection realistisch ab.
   - Take-Profit ist eine ruhende Limit-Order.
-- **Stops** liegen immer vor dem Liquidationspreis, bei höchstens 60 % der Distanz. Ab +1R wird nachgezogen
-  (Trailing auf mindestens Break-even). Dazu kommen ein Zeit-Stop und ein Ausstieg bei Signalumkehr.
+- **Stops** liegen immer vor dem Liquidationspreis, bei höchstens 60 % der Distanz und mindestens 0,4 %
+  entfernt. Ab +1R wird nachgezogen (Trailing auf mindestens Break-even). Dazu kommen ein Zeit-Stop und ein
+  Ausstieg bei Signalumkehr.
+- **Klumpenrisiko:** höchstens 3 Positionen je Asset-Klasse und Richtung, also z. B. nicht sechs
+  Tech-Aktien-Longs auf einmal. Zusätzlich sperrt eine Korrelationsgrenze (0,75), die sofort aus der
+  geladenen Historie berechnet wird.
 - **Ruin:** Fällt das Equity unter 5 USD, beginnt eine neue *Epoche* mit 100 USD. Der Lernstand bleibt.
 
 ### Lernen
@@ -176,8 +200,14 @@ Lern-Horizont (Standard 3 Bars = 15 min) passiert Folgendes:
 > nach Kosten ist, und Stops werden öfter getroffen. Live baut der Bot seine Kerzen aus dem **Mark-Preis**,
 > den Hyperliquid auch für Liquidationen nutzt.
 >
-> Die `xyz`-Aktien-Perps folgen außerdem den US-Börsenzeiten. Außerhalb der Session (Wochenende, Nacht) ist
-> das Oracle eingefroren. Der Bot sperrt dann neue Einstiege und protokolliert den Grund.
+> **Handelszeiten werden gelernt, nicht vorgegeben.** Deine Märkte folgen ganz unterschiedlichen Börsen:
+> US-Aktien, koreanische (SKHX, SMSN, HYUNDAI), japanische (KIOXIA, SOFTBANK) und chinesische (ZHIPU,
+> MINIMAX, UNITREE) Titel, Rohstoffe und FX (24/5), dazu Krypto (24/7).
+>
+> - Das Feature `session` lernt für jeden Markt aus den Daten, zu welcher Tageszeit (werktags/Wochenende)
+>   er aktiv ist.
+> - Live sperrt der Bot neue Einstiege, wenn sich das Oracle seit 20 Minuten nicht bewegt hat, die Börse
+>   des Basiswerts also geschlossen ist. Den Grund schreibt er ins Journal.
 
 ---
 

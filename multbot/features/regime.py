@@ -25,7 +25,7 @@ class Regime:
                 "tradable": self.tradable, "why": self.why}
 
 
-def classify(f: dict[str, float], stale_limit: float = 0.75, block_closed_session: bool = True) -> Regime:
+def classify(f: dict[str, float], stale_limit: float = 0.75, max_oracle_age_min: float = 0.0) -> Regime:
     adx = f.get("adx", 0.0)
     er = f.get("er_20", 0.0)
     hurst = f.get("hurst", 0.5)
@@ -41,8 +41,9 @@ def classify(f: dict[str, float], stale_limit: float = 0.75, block_closed_sessio
     d = f.get("dmi", 0.0) + 0.5 * f.get("ema_align", 0.0)
     trend_dir = 1 if d > 0.15 else -1 if d < -0.15 else 0
     tradable, why = True, ""
+    oracle_age = f.get("oracle_age_min", 0.0)
     if f.get("stale", 0.0) > stale_limit:
         tradable, why = False, "Markt schläft (eingefrorene Bars)"
-    elif block_closed_session and f.get("session", 1.0) <= 0.0:
-        tradable, why = False, "US-Börse geschlossen (Oracle eingefroren)"
+    elif max_oracle_age_min > 0 and oracle_age > max_oracle_age_min:
+        tradable, why = False, f"Oracle seit {oracle_age:.0f} min eingefroren (Börse des Basiswerts zu)"
     return Regime(trend, vol, trend_dir, tradable, why)

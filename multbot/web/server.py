@@ -99,6 +99,11 @@ def create_app(cfg: Config, runner: BaseRunner) -> Starlette:
         if not runner.engine:
             return JSON({"ready": False})
         d = runner.brain.snapshot()
+        # hundreds of markets: keep the per-market IC table to the best-observed ones
+        n_by_coin = {c: v.n for c, v in runner.brain.ic_asset.get("final", {}).items()}
+        top = set(sorted(n_by_coin, key=lambda c: -n_by_coin[c])[:30])
+        d["ic_asset"] = {k: {c: v for c, v in row.items() if c in top} for k, row in d.get("ic_asset", {}).items()}
+        d.pop("weights_asset", None)
         d["ready"] = True
         d["catalog"] = catalog()
         d["feature_desc"] = FEATURES
@@ -111,6 +116,7 @@ def create_app(cfg: Config, runner: BaseRunner) -> Starlette:
         if not runner.engine or coin not in runner.series:
             return JSON({"error": "unbekannt"}, status_code=404)
         n = int(request.query_params.get("n", 300))
+        runner.watch_coin(coin)
         a = runner.series[coin].arrays(last=max(n + 200, 400))
         c = a["c"]
         mid, up, lo, _ = ta.bollinger(c, 20, 2.0)
@@ -140,6 +146,16 @@ def create_app(cfg: Config, runner: BaseRunner) -> Starlette:
         out["weights"] = runner.brain.weights(coin, (out["view"]["regime"] or {}).get("label", "NEUTRAL-MID"))
         return JSON(out)
 
+    async def signals(request: Request):
+        if not runner.engine:
+            return JSON({"keys": [], "rows": []})
+        limit = int(request.query_params.get("limit", 60))
+        q = request.query_params.get("q", "").upper()
+        coins = None
+        if q:
+            coins = [c for c in runner.specs if q in c.upper()]
+        return JSON(runner.engine.signals_matrix(limit, coins))
+
     async def research(_: Request):
         rep = research_state["report"] or load_research()
         return JSON({"report": rep, "running": research_state["running"], "progress": research_state["progress"],
@@ -165,7 +181,9 @@ def create_app(cfg: Config, runner: BaseRunner) -> Starlette:
                 def prog(x):
                     research_state["progress"] = round(x, 3)
 
-                rep = await run_research(rcfg, body.get("interval"), body.get("bars"), progress=prog)
+                coins = body.get("coins") or None
+                rep = await run_research(rcfg, body.get("interval"), body.get("bars"), progress=prog,
+                                         top=body.get("top"), coins=coins)
                 research_state["report"] = rep
             except Exception as e:  # noqa: BLE001
                 log.exception("Research fehlgeschlagen")
@@ -224,6 +242,7 @@ def create_app(cfg: Config, runner: BaseRunner) -> Starlette:
         Route("/api/state", state),
         Route("/api/brain", brain),
         Route("/api/asset/{coin:path}", asset),
+        Route("/api/signals", signals),
         Route("/api/research", research),
         Route("/api/research/run", research_run, methods=["POST"]),
         Route("/api/history/{kind}", history),

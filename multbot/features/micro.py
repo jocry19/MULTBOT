@@ -27,6 +27,7 @@ class MicroState:
     ctx_ms: int = 0
     oi_hist: deque = field(default_factory=lambda: deque(maxlen=2000))  # (ms, oi)
     last_trade_px: float = 0.0
+    oracle_change_ms: int = 0
 
     # ── updates ───────────────────────────────────────────────────────────
     def update_book(self, levels, ms: int) -> None:
@@ -45,7 +46,10 @@ class MicroState:
 
     def update_ctx(self, ctx: dict, ms: int) -> None:
         self.mark = finite(ctx.get("markPx"), self.mark)
-        self.oracle = finite(ctx.get("oraclePx"), self.oracle)
+        oracle = finite(ctx.get("oraclePx"), self.oracle)
+        if oracle != self.oracle or not self.oracle_change_ms:
+            self.oracle_change_ms = ms
+        self.oracle = oracle
         self.mid_ctx = finite(ctx.get("midPx"), self.mid_ctx)
         self.funding_h = finite(ctx.get("funding"), self.funding_h)
         self.premium = finite(ctx.get("premium"), self.premium)
@@ -148,6 +152,7 @@ class MicroState:
             "flow_imb": imb,
             "trade_rate": rate,
             "oi_chg": self.oi_change(now_ms),
+            "oracle_age_min": (now_ms - self.oracle_change_ms) / 60_000 if self.oracle_change_ms else 0.0,
             "premium_bps": self.premium * 1e4 if self.ctx_ms else 0.0,
             "funding_h": self.funding_h,
         }
@@ -160,4 +165,5 @@ class MicroState:
                 "premium": self.premium, "oi": self.open_interest, "oi_usd": self.open_interest * self.mark,
                 "day_volume": self.day_volume, "prev_day_px": self.prev_day_px,
                 "chg_24h": (self.mark / self.prev_day_px - 1) if self.prev_day_px else 0.0,
-                "impact_bid": self.impact_bid, "impact_ask": self.impact_ask, "ms": self.ctx_ms}
+                "impact_bid": self.impact_bid, "impact_ask": self.impact_ask, "ms": self.ctx_ms,
+                "oracle_change_ms": self.oracle_change_ms}

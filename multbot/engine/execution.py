@@ -35,7 +35,13 @@ class ExecutionModel:
     def spread_bps(self, coin: str, now_ms: int) -> float:
         if self.book_fresh(coin, now_ms):
             return self.micro[coin].spread_bps()
-        return float(self.calib.get(coin, {}).get("spread_bps", self.cfg.execution.synthetic_spread_bps))
+        if coin in self.calib:
+            return float(self.calib[coin].get("spread_bps", self.cfg.execution.synthetic_spread_bps))
+        m = self.micro.get(coin)
+        if m and m.impact_bid and m.impact_ask and m.mid > 0:
+            # impact prices are quoted for a larger notional → scale down to a touch-spread estimate
+            return 0.6 * (m.impact_ask - m.impact_bid) / m.mid * 1e4
+        return float(self.cfg.execution.synthetic_spread_bps)
 
     def depth_usd(self, coin: str, side: int, now_ms: int) -> float:
         """Visible depth within 2 % on the side we would take."""
