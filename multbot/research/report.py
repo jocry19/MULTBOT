@@ -166,7 +166,7 @@ async def run_research(cfg: Config, interval: str | None = None, n_bars: int | N
     finally:
         await rest.close()
     brain = Brain(cfg, list(specs))
-    prepared = prepare_features(history, specs, cfg.signal.interval)
+    prepared = prepare_features(history, specs, cfg.signal.interval, cfg.signal.use_lead_lag)
     res = await asyncio.to_thread(run_backtest, cfg, specs, history, brain, calib, None, True, False, progress,
                                   prepared)
     report = build_report(cfg, specs, history, res, brain, calib)

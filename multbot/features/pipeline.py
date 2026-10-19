@@ -72,6 +72,10 @@ FEATURES: dict[str, str] = {
     "trade_rate": "Trades pro Minute",
     "oi_chg": "Open-Interest-Änderung 1 h",
     "oracle_age_min": "Minuten seit der letzten Oracle-Bewegung (live)",
+    "lead_ret_1": "Rendite des Leitmarkts (BTC bzw. XYZ100) letzte Bar, vola-normiert",
+    "lead_ret_3": "Rendite des Leitmarkts letzte 3 Bars, vola-normiert",
+    "lead_beta": "Beta zum Leitmarkt (288 Bars)",
+    "lag_gap": "Nachhol-Lücke: Beta × Leitmarkt-Bewegung − eigene Bewegung (3 Bars, in σ)",
 }
 
 MICRO_KEYS = ["spread_bps", "book_imb5", "book_imb20", "microprice_bps", "depth_usd", "flow_imb",
@@ -82,7 +86,31 @@ ML_FEATURES = ["ret_z", "ret_3n", "ret_12n", "ema_spread", "ema_slope", "ema_ali
                "macd_hist_z", "bb_z", "bb_width_rank", "squeeze_prev", "don_break", "don_pos_c", "adx_n", "dmi",
                "stoch_c", "vwap_dev", "vol_z", "er_20", "hurst_c", "ac_1", "kf_slope_z", "kf_dev", "skew",
                "obv_flow", "funding_z", "premium_bps", "hour_sin", "hour_cos", "session", "tsmom", "vol_pct",
-               "range_pos_c", "book_imb5", "book_imb20", "microprice_bps", "flow_imb", "oi_chg"]
+               "range_pos_c", "book_imb5", "book_imb20", "microprice_bps", "flow_imb", "oi_chg",
+               "lead_ret_1", "lead_ret_3", "lag_gap"]
+
+LEADERS = {"crypto": "BTC", "equity": "xyz:XYZ100", "etf": "xyz:XYZ100"}
+
+
+def leader_of(coin: str, asset_class: str, available) -> str | None:
+    """Market whose moves this market tends to follow (BTC for crypto, the XYZ100 index for stocks)."""
+    lead = LEADERS.get(asset_class)
+    if lead is None or lead == coin or lead not in available:
+        return None
+    return lead
+
+
+def align_leader(t: np.ndarray, lead_t: np.ndarray, lead_c: np.ndarray) -> np.ndarray | None:
+    """Leader closes at the same bar timestamps (forward-filled); None if there is no overlap."""
+    if len(lead_t) == 0 or len(t) == 0:
+        return None
+    idx = np.searchsorted(lead_t, t, side="right") - 1
+    if (idx >= 0).sum() < len(t) * 0.5:
+        return None
+    out = lead_c[np.clip(idx, 0, len(lead_c) - 1)].astype(float)
+    first_valid = int(np.argmax(idx >= 0))
+    out[:first_valid] = out[first_valid]
+    return out
 
 
 def activity_profile(t: np.ndarray, active: np.ndarray, alpha: float = 0.08, prior: float = 0.5) -> np.ndarray:
@@ -104,7 +132,7 @@ def activity_profile(t: np.ndarray, active: np.ndarray, alpha: float = 0.08, pri
 
 
 def compute_features(a: dict[str, np.ndarray], interval_ms: int, funding_h: np.ndarray | None = None,
-                     premium: np.ndarray | None = None) -> dict[str, np.ndarray]:
+                     premium: np.ndarray | None = None, lead: np.ndarray | None = None) -> dict[str, np.ndarray]:
     t, o, h, l, c, v = a["t"], a["o"], a["h"], a["l"], a["c"], a["v"]
     n = len(c)
     f: dict[str, np.ndarray] = {"t": t.astype(float), "close": c}
@@ -195,6 +223,23 @@ def compute_features(a: dict[str, np.ndarray], interval_ms: int, funding_h: np.n
         f["range_pos"] = np.nan_to_num(np.where(rh - rl > 0, (c - rl) / (rh - rl), 0.5), nan=0.5)
     for key in MICRO_KEYS:
         f[key] = np.zeros(n)
+    # lead-lag versus the leader market (crypto → BTC, stocks → XYZ100 index)
+    if lead is not None and len(lead) == n and n > 10:
+        lr = st.log_returns(lead)
+        lvol = np.maximum(np.nan_to_num(ta.rolling_std(lr, 48), nan=np.nanstd(lr[: min(n, 48)])), 1e-6)
+        lr3 = np.nan_to_num(np.log(np.maximum(lead, 1e-300) / np.maximum(ta.shift(lead, 3, lead[0]), 1e-300)))
+        wnd = min(288, max(n - 1, 10))
+        cov = ta.sma(r * lr, wnd) - ta.sma(r, wnd) * ta.sma(lr, wnd)
+        var = ta.sma(lr * lr, wnd) - ta.sma(lr, wnd) ** 2
+        with np.errstate(invalid="ignore", divide="ignore"):
+            beta = np.clip(np.nan_to_num(np.where(var > 1e-14, cov / var, 0.0)), -3, 3)
+        f["lead_ret_1"] = lr / lvol
+        f["lead_ret_3"] = lr3 / (lvol * math.sqrt(3))
+        f["lead_beta"] = beta
+        f["lag_gap"] = np.clip((beta * lr3 - f["ret_3"]) / (vol * math.sqrt(3)), -8, 8)
+    else:
+        for key in ("lead_ret_1", "lead_ret_3", "lead_beta", "lag_gap"):
+            f[key] = np.zeros(n)
     # derived / centred variants used by the ML model
     f["ret_3n"] = f["ret_3"] / (vol * math.sqrt(3))
     f["ret_12n"] = f["ret_12"] / (vol * math.sqrt(12))

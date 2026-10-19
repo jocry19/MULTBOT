@@ -12,7 +12,7 @@ from ..data.bars import arrays_from_bars
 from ..data.history import History
 from ..engine.engine import Engine
 from ..exchange.meta import MarketSpec
-from ..features.pipeline import compute_features, row
+from ..features.pipeline import align_leader, compute_features, leader_of, row
 from ..learning.brain import Brain
 from ..util import HOUR_MS, INTERVAL_MS
 
@@ -34,15 +34,17 @@ class BacktestResult:
     bars: int = 0
 
 
-def prepare_features(history: dict[str, History], specs: dict[str, MarketSpec], interval: str) -> dict[str, dict]:
+def prepare_features(history: dict[str, History], specs: dict[str, MarketSpec], interval: str,
+                     use_lead: bool = True) -> dict[str, dict]:
     out = {}
     ims = INTERVAL_MS[interval]
-    for coin, h in history.items():
-        if not h.bars:
-            continue
-        a = arrays_from_bars(h.bars)
+    arrays = {c: arrays_from_bars(h.bars) for c, h in history.items() if h.bars}
+    for coin, a in arrays.items():
+        h = history[coin]
         fr, pr = h.funding_aligned(a["t"])
-        f = compute_features(a, ims, fr, pr)
+        lead_coin = leader_of(coin, specs[coin].asset_class, arrays) if use_lead and coin in specs else None
+        lead = align_leader(a["t"], arrays[lead_coin]["t"], arrays[lead_coin]["c"]) if lead_coin else None
+        f = compute_features(a, ims, fr, pr, lead)
         out[coin] = {"a": a, "f": f, "hist": h}
     return out
 
@@ -62,7 +64,7 @@ def run_backtest(cfg: Config, specs: dict[str, MarketSpec], history: dict[str, H
     t0 = time.time()
     interval = cfg.signal.interval
     ims = INTERVAL_MS[interval]
-    data = prepared or prepare_features(history, specs, interval)
+    data = prepared or prepare_features(history, specs, interval, cfg.signal.use_lead_lag)
     engine = Engine(cfg, specs, brain, store=None, run="backtest", mode="backtest", calib=calib, journal_size=4000)
     times = sorted({int(t) for d in data.values() for t in d["a"]["t"]})
     if not times:

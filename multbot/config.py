@@ -78,6 +78,8 @@ class SignalCfg:
     regime_gate_ic: float | None = 0.0   # same per market regime
     gate_min_obs: int = 150              # observations before a gate may block
     funding_hold_hours: float = 2.0      # expected holding time for the funding cost estimate
+    use_lead_lag: bool = True            # lead-lag features vs BTC / XYZ100
+    disabled_strategies: list = field(default_factory=list)
 
 
 @dataclass

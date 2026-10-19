@@ -82,8 +82,9 @@ class Brain:
         if ha and ha.n:
             layers.append((ha.logw, min(1.0, ha.n / 300)))
         w = softmax_floor(blend_logw(layers), self.cfg.learning.hedge_floor)
-        for k in self.muted:
-            w[k] = 0.0
+        for k in self.muted | set(self.cfg.signal.disabled_strategies):
+            if k in w:
+                w[k] = 0.0
         s = sum(w.values()) or 1.0
         return {k: v / s for k, v in w.items()}
 
@@ -102,7 +103,8 @@ class Brain:
         all_scores = dict(scores)
         all_scores[ML_KEY] = ml_score
         w = self.weights(coin, regime)
-        rule_keys = [k for k in STRATEGY_KEYS if k not in self.muted]
+        off = self.muted | set(self.cfg.signal.disabled_strategies)
+        rule_keys = [k for k in STRATEGY_KEYS if k not in off]
         w_rules = {k: w[k] for k in rule_keys}
         tot = sum(w_rules.values()) or 1.0
         active = {k: v for k, v in w_rules.items() if abs(all_scores[k]) > 0.05}

@@ -172,6 +172,14 @@ def oi_confirmation(f) -> Score:
     return _t(oi / 0.02) * direction, f"OI Δ1h {oi * 100:+.2f}% bei Kurs {'↑' if direction > 0 else '↓'}"
 
 
+# ── cross-market ────────────────────────────────────────────────────────────
+def lead_lag(f) -> Score:
+    gap = f.get("lag_gap", 0.0)
+    if abs(gap) < 0.6 or f.get("lead_beta", 0.0) <= 0.2:
+        return 0.0, f"Nachhol-Lücke {gap:+.2f}σ (zu klein / kein Gleichlauf)"
+    return _t(gap / 1.8), f"Leitmarkt zog {f.get('lead_ret_3', 0.0):+.1f}σ, Lücke {gap:+.2f}σ (β {f.get('lead_beta', 0.0):.2f})"
+
+
 STRATEGIES: list[StrategyDef] = [
     StrategyDef("ema_trend", "EMA-Trend", "Trend", "EMA 9/21/55 Ausrichtung + Steigung, ATR-normiert", ema_trend),
     StrategyDef("macd_mom", "MACD-Momentum", "Trend", "z-normiertes MACD-Histogramm", macd_momentum),
@@ -193,6 +201,8 @@ STRATEGIES: list[StrategyDef] = [
     StrategyDef("funding", "Funding-Kontra", "Carry", "Gegen überfüllte Seite + Funding-Carry",
                 funding_contrarian),
     StrategyDef("premium", "Prämien-Reversion", "Carry", "Mark/Oracle-Prämie konvergiert", premium_reversion),
+    StrategyDef("leadlag", "Lead-Lag", "Cross-Market", "Nachholbewegung gegenüber BTC bzw. XYZ100 (Beta-adjustiert)",
+                lead_lag),
     StrategyDef("book", "Orderbuch-Druck", "Mikrostruktur", "Tiefen-Imbalance + Microprice", book_imbalance,
                 live_only=True),
     StrategyDef("flow", "Order-Flow", "Mikrostruktur", "Aggressor-Kauf/Verkauf-Fluss", trade_flow, live_only=True),

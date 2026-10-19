@@ -22,7 +22,7 @@ from ..data.store import Store
 from ..exchange.hyperliquid import HLRest, HLWebSocket
 from ..exchange.meta import MarketSpec, build_specs, offline_specs
 from ..features.micro import MicroState
-from ..features.pipeline import MICRO_KEYS, compute_features, row
+from ..features.pipeline import MICRO_KEYS, align_leader, compute_features, leader_of, row
 from ..learning.brain import Brain
 from ..research.backtest import prepare_features, run_backtest
 from ..research.report import build_report
@@ -113,7 +113,7 @@ class BaseRunner:
         def prog(x):
             self.status["progress"] = round(x, 3)
 
-        prepared = prepare_features(history, self.specs, self.cfg.signal.interval)
+        prepared = prepare_features(history, self.specs, self.cfg.signal.interval, self.cfg.signal.use_lead_lag)
         res = run_backtest(self.cfg, self.specs, history, self.brain, self.calib, None, True, True, prog, prepared)
         rep = build_report(self.cfg, self.specs, history, res, self.brain, self.calib, label="pretrain")
         self.pretrain = rep
@@ -142,7 +142,7 @@ class BaseRunner:
         if n <= self.cfg.signal.warmup_bars:
             return 0
         fr, pr = self._fund_arrays(coin, a["t"])
-        f = compute_features(a, self.bar_ms, fr, pr)
+        f = compute_features(a, self.bar_ms, fr, pr, self._lead(coin, a["t"]))
         since = self.brain.trained_until.get(coin, 0)
         spread = self.engine.exec.spread_bps(coin, self.now())
         learned = 0
@@ -260,10 +260,19 @@ class BaseRunner:
             fr[i], pr[i] = prev
         return fr, pr
 
+    def _lead(self, coin: str, t: np.ndarray) -> np.ndarray | None:
+        if not self.cfg.signal.use_lead_lag:
+            return None
+        lead_coin = leader_of(coin, self.specs[coin].asset_class, self.series)
+        if not lead_coin or not len(self.series[lead_coin]):
+            return None
+        la = self.series[lead_coin].arrays(last=FEATURE_WINDOW + 50)
+        return align_leader(t, la["t"], la["c"])
+
     def feature_row(self, coin: str, t: int) -> dict:
         a = self.series[coin].arrays(last=FEATURE_WINDOW)
         fr, pr = self._fund_arrays(coin, a["t"])
-        f = compute_features(a, self.bar_ms, fr, pr)
+        f = compute_features(a, self.bar_ms, fr, pr, self._lead(coin, a["t"]))
         r = row(f)
         mf = self.micro[coin].features(t)
         for k in MICRO_KEYS:
