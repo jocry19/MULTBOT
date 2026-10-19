@@ -642,7 +642,7 @@
         { data: cur.map((p) => [p.n, p.ic_ens]), color: CH.C.violet, label: "IC Ensemble", dash: [3, 2] },
         { data: cur.map((p) => [p.n, p.ml_acc - 0.5]), color: CH.C.up, label: "ML-Genauigkeit − 50 %" }], yFmt: (v) => v.toFixed(3), empty: "Lernkurve erscheint nach den ersten 25 Auswertungen" });
       setR("curve", '<span class="amber">■ Treffer−50%</span> <span class="cyan">■ IC</span> <span class="violet">■ IC Ens.</span> <span class="up">■ ML−50%</span>');
-      set("lm", `<div class="metrics">${metric("Ausgewertet", (b.n_resolved || 0).toLocaleString(), "amber", "Beobachtungen " + (b.n_observed || 0).toLocaleString())}` +
+      set("lm", `<div class="metrics">${metric("Ausgewertet", (b.n_resolved || 0).toLocaleString(), "amber", "davon sauber " + (b.n_clean ?? 0).toLocaleString() + " · beobachtet " + (b.n_observed || 0).toLocaleString())}` +
         metric("Horizont", b.horizon + " Bars", "", "Meta " + b.meta_h + " Bars") + metric("IC final", f(b.ic_final, 4), cls(b.ic_final)) +
         metric("Treffer (300)", pct(b.hit_recent, 1), cls((b.hit_recent || 0.5) - 0.5)) + metric("ML n", b.ml.n.toLocaleString(), "", b.ml.ready ? "aktiv" : "lernt") +
         metric("ML Brier", f(b.ml.brier, 4), b.ml.brier < 0.25 ? "up" : "down", "Acc " + pct(b.ml.acc, 1)) + metric("Meta n", b.meta.n.toLocaleString(), "", b.meta.ready ? "filtert Trades" : "lernt") +

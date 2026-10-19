@@ -81,6 +81,7 @@ class Brain:
         self.curve: list[dict] = []
         self.recent_final = deque(maxlen=300)
         self.n_resolved = 0
+        self.n_clean = 0          # resolutions that also fed the evaluating statistics
         self.n_observed = 0
         self.trained_until: dict[str, int] = {c: 0 for c in self.coins}
         self.muted: set[str] = set()
@@ -201,18 +202,21 @@ class Brain:
         flat = abs(ret) < 1e-9
         norm = max(-3.0, min(3.0, ret / (it["vol"] * math.sqrt(h))))
         s = it["s"]
-        if h in self.ic and not flat:
+        # Live history pre-training runs market by market, so a later market's signals already benefit from what
+        # the brain learned on other markets over the same period. That is fine for warm-starting the weights and
+        # the ML model (live decisions never see the future), but every *evaluating* statistic – meta model, IC,
+        # hit rates, calibration, muting, move table – would come out too optimistic. Those learn only from clean
+        # (live / interleaved backtest) observations.
+        clean = not it.get("pre")
+        if h in self.ic and not flat and clean:
             idx = np.nonzero(s)[0]
             self.ic[h].add(idx, s[idx], norm)
-        if h == self.meta_h and it["meta_x"] is not None and it["side"]:
+        if h == self.meta_h and it["meta_x"] is not None and it["side"] and clean:
             win = 1.0 if it["side"] * ret > it["cost"] else 0.0
             pm = self.meta.predict(it["meta_x"])
             self.cal_meta.add(pm, win)
             self.meta.update(it["meta_x"], win)
-        if h == self.H and it["side"] and not it.get("pre"):
-            # Live history pre-training runs market by market, so a later market's signals already benefit from
-            # what the brain learned on other markets over the same period – fine for warm-starting weights, but
-            # it would overstate how far signals move. The move table therefore learns only from clean data.
+        if h == self.H and it["side"] and clean:
             cap = 4.0 * it["vol"] * math.sqrt(h)                  # winsorise pumps / dumps of thin markets
             fav = it["side"] * max(-cap, min(cap, ret))           # flat bars count too: a trade only pays costs
             self.move.add(fav)
@@ -228,8 +232,11 @@ class Brain:
             self.hedge_regime[regime].update(rewards)
         self.hedge_asset[coin].update(rewards)
         y = 1.0 if ret > 0 else 0.0
-        self.cal_ml.add(it["p_up"], y)
         self.ml.update(it["x"], y)
+        self.n_resolved += 1
+        if not clean:
+            return
+        self.cal_ml.add(it["p_up"], y)
         idx = np.nonzero(np.abs(s) > 0.05)[0]
         if len(idx):
             sv = s[idx]
@@ -246,10 +253,10 @@ class Brain:
         self.feat_ic.add(xi, it["x"][xi], norm)
         if abs(it["final"]) > 0.1:
             self.recent_final.append(1.0 if (it["final"] > 0) == (ret > 0) else 0.0)
-        self.n_resolved += 1
-        if self.n_resolved % 10 == 0:
+        self.n_clean += 1
+        if self.n_clean % 10 == 0:
             self._update_mutes()
-        if self.n_resolved % 25 == 0:
+        if self.n_clean % 25 == 0:
             self._curve_point(t)
 
     def _update_mutes(self) -> None:
@@ -341,7 +348,7 @@ class Brain:
 
     def snapshot(self, light: bool = False, asset_limit: int | None = None) -> dict:
         snap = {
-            "n_resolved": self.n_resolved, "n_observed": self.n_observed, "horizon": self.H,
+            "n_resolved": self.n_resolved, "n_clean": self.n_clean, "n_observed": self.n_observed, "horizon": self.H,
             "horizons": self.horizons, "meta_h": self.meta_h,
             "ml": {"n": self.ml.n, "brier": self.ml.brier(), "acc": self.ml.accuracy(), "logloss": self.ml.logloss(),
                    "ready": self.ml_ready},
@@ -392,7 +399,7 @@ class Brain:
             "shadow": self.shadow.tolist(), "cnt_n": self.cnt_n.tolist(), "cnt_hit": self.cnt_hit.tolist(),
             "cal_ml": self.cal_ml.to_dict(), "cal_meta": self.cal_meta.to_dict(),
             "curve": self.curve, "recent_final": list(self.recent_final),
-            "n_resolved": self.n_resolved, "n_observed": self.n_observed,
+            "n_resolved": self.n_resolved, "n_clean": self.n_clean, "n_observed": self.n_observed,
             "trained_until": self.trained_until, "muted": sorted(self.muted),
         }
 
@@ -438,6 +445,7 @@ class Brain:
         self.curve = list(d.get("curve", []))
         self.recent_final.extend(d.get("recent_final", []))
         self.n_resolved = int(d.get("n_resolved", 0))
+        self.n_clean = int(d.get("n_clean", 0))
         self.n_observed = int(d.get("n_observed", 0))
         for c, t in d.get("trained_until", {}).items():
             if c in self.trained_until:

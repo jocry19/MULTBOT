@@ -654,3 +654,17 @@ def test_alpha_lab_runs_and_finds_a_planted_edge(cfg):
     good = evaluate(P, P.past_z(72), 24, thr=1.0)
     bad = evaluate(P, -P.past_z(72), 24, thr=1.0)
     assert good["A"]["net_bps"] > bad["A"]["net_bps"] and good["B"]["net_bps"] > bad["B"]["net_bps"]
+
+
+def test_live_pretraining_only_warms_weights_not_evaluations(cfg):
+    """Market-by-market pre-training leaks across markets: it may train weights / ML, never meta, IC or arms."""
+    brain = Brain(cfg, ["A"])
+    s = np.zeros(len(brain.track))
+    s[0], s[brain.i_final] = 0.8, 0.5
+    for i in range(brain.meta_h + 2):
+        brain.observe("A", i, 100.0, 0.001, "TREND-HIGH", {"s": s, "final": 0.5, "p_up": 0.6,
+                      "x": np.ones(len(ML_FEATURES))}, {}, np.ones(len(brain.meta.names)), 1, 0.0, pretrain=True)
+        brain.on_bar("A", 100.0 * (1 + 0.001 * i), i)
+    assert brain.n_resolved > 0 and brain.ml.n > 0 and brain.hedge_global.n > 0
+    assert brain.n_clean == 0 and brain.meta.n == 0 and brain.cnt_n.sum() == 0
+    assert brain.ic[brain.H].n.sum() == 0 and brain.move.n == 0
