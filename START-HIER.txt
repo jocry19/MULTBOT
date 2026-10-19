@@ -9,6 +9,13 @@ nach Kosten im Plus erwartet werden.
 Gemessen wird der PnL in USD (realisiert + offen) - kein Kontostand, der
 limitiert, kein Totalverlust. Einstellbar in config.yaml unter "account".
 
+WIE ER ENTSCHEIDET (Standard: "Marktsprache"): keine festen Strategien.
+Jede Bar wird zu einem Wort (Bewegung x Volumen x Spanne), dazu die
+Stimmung aller Maerkte und der Verlauf der letzten Stunde. Der Bot lernt
+live, was auf welche Woerter folgt, und vergisst Altes wieder. Seite F12
+("SPRACHE") zeigt, was er gerade liest. Zurueck zum alten Verfahren:
+in config.yaml  signal: mode: ensemble
+
 UPDATE VON MULTBOT: Diesen Ordner neben den alten MULTBOT-Ordner legen.
 Beim ersten Start uebernimmt MULT Q2 automatisch Konto, offene Positionen
 und Trades von dort (der alte Ordner bleibt unveraendert).
@@ -35,7 +42,7 @@ Auf dem Handy (WLAN):    MULT-Q2.bat run --lan  -> Adresse aus dem Protokoll
                          im Handy-Browser oeffnen
 
 Bedienung im Terminal: Kommandozeile oben rechts, z.B. "GEV <GO>", "LRN", "RES",
-oder die Tasten F1-F11 (F11 = Alpha-Labor). "HELP" zeigt alle Kommandos.
+oder die Tasten F1-F12 (F11 = Alpha-Labor, F12 = Sprache). "HELP" zeigt alle Kommandos.
 
 WICHTIG: Reine Simulation. Es werden keine echten Orders gesendet und kein
 Geld bewegt. Keine Anlageberatung.
