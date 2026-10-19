@@ -11,13 +11,17 @@ that market's own recent behaviour (nothing is a fixed price level or indicator 
 (risk-off / mixed / risk-on) and how hectic they were (calm / normal / hectic) → 9 moods.
 
 **Grammar.** An online variable-order context model – the principle of predictive text: for every phrase
-(the last word, the last two, the last three words, with and without the mood, and each market's own
-*dialect*) it keeps an exponentially forgetting average of what came next: the move over the horizon in units
+(the mood, the course of the last hour as one word, the last word, the last two, the last three words, and
+each market's own *dialect*) it keeps an exponentially forgetting average of what came next: the move over the horizon in units
 of volatility. A prediction backs off from long, specific phrases to short, general ones (Bayesian shrinkage),
 weighted by how much evidence each phrase has. Nothing is decided in advance: phrases that stop working fade
 away (forgetting), new ones emerge as the market starts speaking differently.
 
-**Speaking** = trading: a direction is only "said" when the learned phrase predicts a move that is large and
+**Reading in context.** A single word is noisy – what counts is what the market has been saying lately: the
+decision signal is the exponentially smoothed prediction of the last words (half-life ≈ a third of the
+horizon), so one odd bar does not flip the bot in and out of positions.
+
+**Speaking** = trading: a direction is only "said" when the learned phrases predict a move that is large and
 well-supported enough; the engine then still demands that the expected move beats the costs.
 """
 from __future__ import annotations
@@ -45,7 +49,8 @@ RANGE_WORD = ("enge Spanne", "normale Spanne", "weite Spanne")
 N_WORDS = len(MOVE_SYM) * len(VOLUME_SYM) * len(RANGE_SYM)
 N_MOODS = len(MOOD_BREADTH) * len(MOOD_ACTIVITY)
 # memory per phrase order, in updates of that phrase (≈ how long a phrase "remembers")
-HALFLIFE = {"m": 20000.0, "1": 4000.0, "2": 1500.0, "3": 800.0, "d": 400.0}
+HALFLIFE = {"m": 20000.0, "t": 8000.0, "1": 3000.0, "2": 1200.0, "3": 800.0, "d": 400.0}
+COURSE_SYM = ("⇊", "↓", "·", "↑", "⇈")      # the last hour as one word (12 bars at 5m, horizon-scaled)
 
 
 def _bucket(x: float, edges: tuple) -> int:
@@ -107,7 +112,7 @@ class _Stat:
 
 
 class MarketLanguage:
-    VERSION = 1
+    VERSION = 2
 
     def __init__(self, horizon: int, kappa: float = 100.0, kappa_dialect: float = 300.0, z_full: float = 4.0):
         self.H = int(horizon)
@@ -117,6 +122,9 @@ class MarketLanguage:
         self.lam = {k: 0.5 ** (1.0 / hl) for k, hl in HALFLIFE.items()}
         self.stats: dict[tuple, _Stat] = {}
         self.words: dict[str, deque] = {}            # last three words per market
+        self.course: dict[str, int] = {}             # course of the last hour per market
+        self.said: dict[str, list] = {}              # smoothed recent prediction per market: [mu, z]
+        self.alpha = 1 - 0.5 ** (1.0 / max(1.0, self.H / 3.0))
         self.pending: dict[str, deque] = {}
         self.cur_t = 0
         self.cur = [0, 0, 0.0]                       # ups, markets, Σ|ret_z| of the bar being collected
@@ -141,17 +149,16 @@ class MarketLanguage:
             self.cur[1] += 1
             self.cur[2] += min(abs(ret_z), 5.0)
 
-    def _contexts(self, coin: str, ws: deque, md: int) -> list[tuple]:
+    def _contexts(self, coin: str, ws: deque, md: int, course: int = 2) -> list[tuple]:
+        # from general to specific: each phrase refines the one before it (back-off chain)
         w = list(ws)
-        ctx = [("m", md)]
+        ctx = [("m", md), ("t", course, md), ("d", coin, course)]
         if len(w) >= 1:
-            ctx.append(("1", w[-1], md))
+            ctx.append(("1", w[-1], course, md))
         if len(w) >= 2:
-            ctx.append(("2", w[-2], w[-1], md))
+            ctx.append(("2", w[-2], w[-1], course))
         if len(w) >= 3:
             ctx.append(("3", w[-3], w[-2], w[-1]))
-        if len(w) >= 1:
-            ctx.append(("d", coin, w[-1]))
         return ctx
 
     def predict(self, contexts: list[tuple]) -> tuple[float, float, int]:
@@ -177,15 +184,24 @@ class MarketLanguage:
         w = word_of(frow)
         ws = self.words.setdefault(coin, deque(maxlen=3))
         ws.append(w)
-        ctx = self._contexts(coin, ws, self.mood)
+        course = _bucket(float(frow.get("ret_12n", 0.0)), MOVE_EDGES)
+        self.course[coin] = course
+        ctx = self._contexts(coin, ws, self.mood, course)
         mu, z, ev = self.predict(ctx)
         vol = max(float(frow.get("vol", 1e-4)), 1e-6)
         if learn:
             self.pending.setdefault(coin, deque()).append(
                 {"ctx": ctx, "px": float(frow["close"]), "vol": vol, "mu": mu, "z": z, "age": 0, "pre": pretrain})
-        final = math.copysign(min(1.0, abs(z) / self.z_full), mu) if mu else 0.0
-        return {"word": w, "mood": self.mood, "mu": mu, "z": z, "evidence": ev, "final": final,
-                "exp_move": abs(mu) * vol * math.sqrt(self.H), "sentence": list(ws)}
+        said = self.said.get(coin)
+        if said is None:
+            said = self.said[coin] = [mu, z]
+        else:   # what the market has been saying lately, not just its last word
+            said[0] += self.alpha * (mu - said[0])
+            said[1] += self.alpha * (z - said[1])
+        smu, sz = said
+        final = math.copysign(min(1.0, abs(sz) / self.z_full), smu) if smu and sz * smu > 0 else 0.0
+        return {"word": w, "mood": self.mood, "course": course, "mu": smu, "z": sz, "mu_word": mu, "z_word": z,
+                "evidence": ev, "final": final, "exp_move": abs(smu) * vol * math.sqrt(self.H), "sentence": list(ws)}
 
     # ── learning ─────────────────────────────────────────────────────────
     def on_bar(self, coin: str, close: float, t: int) -> int:
@@ -242,25 +258,30 @@ class MarketLanguage:
         if c[0] == "m":
             return f"Stimmung {mood_text(c[1])}"
         if c[0] == "d":
-            return f"{c[1]}: {word_symbol(c[2])}"
-        words = c[1:-1] if c[0] in ("1", "2") else c[1:]
-        txt = " → ".join(word_symbol(w) for w in words)
-        return txt + (f"  [{mood_text(c[-1])}]" if c[0] in ("1", "2") else "")
+            return f"{c[1]} · Stunde {COURSE_SYM[c[2]]}"
+        if c[0] == "t":
+            return f"Stunde {COURSE_SYM[c[1]]}  [{mood_text(c[2])}]"
+        if c[0] == "1":
+            return f"{word_symbol(c[1])} · Stunde {COURSE_SYM[c[2]]}  [{mood_text(c[3])}]"
+        if c[0] == "2":
+            return f"{word_symbol(c[1])} → {word_symbol(c[2])} · Stunde {COURSE_SYM[c[3]]}"
+        return " → ".join(word_symbol(w) for w in c[1:])
 
     def snapshot(self, coins: list[str] | None = None, top: int = 25) -> dict:
         vocab = []
+        by_word: dict[int, list] = {}
+        for c, s in self.stats.items():
+            if c[0] == "1":
+                acc = by_word.setdefault(c[1], [0.0, 0.0])
+                acc[0] += s.w
+                acc[1] += s.w * s.m
         for w in range(N_WORDS):
-            tot_w = tot_m = 0.0
-            for md in range(N_MOODS):
-                s = self.stats.get(("1", w, md))
-                if s:
-                    tot_w += s.w
-                    tot_m += s.w * s.m
+            tot_w, tot_m = by_word.get(w, [0.0, 0.0])
             vocab.append({"w": w, "sym": word_symbol(w), "text": word_text(w), "weight": round(tot_w, 1),
                           "mean": round(tot_m / tot_w, 4) if tot_w else None})
         phrases = []
         for c, s in self.stats.items():
-            if c[0] in ("2", "3") and s.w >= 40:
+            if c[0] in ("1", "2", "3") and s.w >= 40:
                 t = s.m / math.sqrt(s.var / s.w)
                 phrases.append((abs(t), c, s, t))
         phrases.sort(key=lambda x: -x[0])
@@ -273,7 +294,7 @@ class MarketLanguage:
         for coin in (coins or list(self.words))[:60]:
             ws = self.words.get(coin)
             if ws:
-                sentences[coin] = [word_symbol(w) for w in ws]
+                sentences[coin] = [word_symbol(w) for w in ws] + [f"| Stunde {COURSE_SYM[self.course.get(coin, 2)]}"]
         return {
             "horizon": self.H, "phrases_known": len(self.stats), "learned": self.n_learned, "ic": self.ic_value(),
             "hit": self.hit_rate(), "hit_n": self.acc_n, "mood": self.mood, "mood_text": mood_text(self.mood),
@@ -289,7 +310,8 @@ class MarketLanguage:
     def to_dict(self) -> dict:
         return {"version": self.VERSION, "H": self.H,
                 "stats": [[list(c), s.to_list()] for c, s in self.stats.items() if s.w > 0.5],
-                "words": {c: list(w) for c, w in self.words.items()}, "mood": self.mood,
+                "words": {c: list(w) for c, w in self.words.items()}, "mood": self.mood, "course": self.course,
+                "said": self.said,
                 "acc": [self.acc_n, self.acc_hits], "ic": self.ic, "curve": self.curve[-500:],
                 "n_learned": self.n_learned}
 
@@ -299,6 +321,8 @@ class MarketLanguage:
         self.stats = {tuple(c): _Stat.from_list(x) for c, x in d.get("stats", [])}
         for c, w in d.get("words", {}).items():
             self.words[c] = deque(w, maxlen=3)
+        self.course = {c: int(v) for c, v in d.get("course", {}).items()}
+        self.said = {c: [float(v[0]), float(v[1])] for c, v in d.get("said", {}).items()}
         self.mood = int(d.get("mood", 4))
         self.acc_n, self.acc_hits = (int(x) for x in d.get("acc", [0, 0]))
         if len(d.get("ic", [])) == 6:

@@ -691,14 +691,18 @@ def test_market_language_learns_a_phrase_and_forgets_nothing_fixed():
     quiet_flat = word_of({"ret_z": 0.0, "vol_z": 0.0, "rng_z": 1.0})
     up = lang.read("A", t + 300_000, {"ret_z": 2.0, "vol_z": 1.5, "rng_z": 2.5, "vol": 0.002, "close": 100.0},
                    learn=False)
-    assert up["word"] == loud_up and up["mu"] > 0.3 and up["z"] > 2 and up["final"] > 0.4
+    assert up["word"] == loud_up and up["mu_word"] > 0.3 and up["z_word"] > 2
+    for _ in range(4):   # the decision signal is what the market has been saying lately (smoothed)
+        up = lang.read("A", t + 300_000, {"ret_z": 2.0, "vol_z": 1.5, "rng_z": 2.5, "vol": 0.002, "close": 100.0},
+                       learn=False)
+    assert up["mu"] > 0.3 and up["final"] > 0.4
     flat = lang.read("B", t + 300_000, {"ret_z": 0.0, "vol_z": 0.0, "rng_z": 1.0, "vol": 0.002, "close": 100.0},
                      learn=False)
-    assert flat["word"] == quiet_flat and abs(flat["mu"]) < up["mu"] / 2
+    assert flat["word"] == quiet_flat and abs(flat["mu_word"]) < up["mu_word"] / 2
     snap = lang.snapshot()
     assert snap["phrases_known"] > 10 and snap["ic"] > 0.1 and len(snap["vocab"]) == 45
     d = json.loads(json.dumps(lang.to_dict()))
     lang2 = MarketLanguage(horizon=3, kappa=20, kappa_dialect=50)
     lang2.load(d)
-    assert lang2.predict(lang._contexts("A", lang.words["A"], lang.mood))[0] == pytest.approx(
-        lang.predict(lang._contexts("A", lang.words["A"], lang.mood))[0])
+    ctx = lang._contexts("A", lang.words["A"], lang.mood, lang.course["A"])
+    assert lang2.predict(ctx)[0] == pytest.approx(lang.predict(ctx)[0]) and lang2.said["A"] == lang.said["A"]

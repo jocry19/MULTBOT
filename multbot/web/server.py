@@ -217,7 +217,8 @@ def create_app(cfg: Config, runner: BaseRunner) -> Starlette:
                 lp = runner.brain.lang
                 ws = lp.words.get(c)
                 if ws:
-                    mu, z, ev = lp.predict(lp._contexts(c, ws, lp.mood))
+                    ev = lp.predict(lp._contexts(c, ws, lp.mood, lp.course.get(c, 2)))[2]
+                    mu, z = lp.said.get(c, [0.0, 0.0])
                     now[c] = {"sentence": snap["sentences"].get(c), "mu": mu, "z": z, "evidence": ev,
                               "status": v.status}
         snap["now"] = now
