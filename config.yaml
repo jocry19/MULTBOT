@@ -388,6 +388,8 @@ fees:
   base_taker: 0.00045           # Hyperliquid Tier 0
   base_maker: 0.00015
   use_exchange_scaling: true    # HIP-3 Deployer-Fee-Scale + Growth-Mode aus der Meta übernehmen
+  staking_discount: 0.0         # eigenes Konto modellieren: HYPE-Staking-Rabatt 0.05 (Wood) … 0.40 (Diamond)
+  referral_discount: 0.0        # 0.04 mit Referral-Code (erste 25 Mio. USD Volumen)
 
 execution:
   book_levels: 20

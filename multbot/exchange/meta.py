@@ -122,6 +122,7 @@ def build_specs(cfg: Config, metas: dict[str, dict], ctxs: dict[str, list] | Non
         growth = str(u.get("growthMode", "")).lower() == "enabled"
         scale = finite(u.get("deployerFeeScale", 1.0), 1.0)
         mult = hip3_fee_multiplier(scale, growth) if dex and cfg.fees.use_exchange_scaling else 1.0
+        mult *= cfg.fees.discount
         specs[coin] = MarketSpec(
             coin=coin, dex=dex, symbol=coin.split(":", 1)[1] if ":" in coin else coin, exchange_max_leverage=ex_max,
             leverage=lev, sz_decimals=int(u.get("szDecimals", 0)), only_isolated=bool(u.get("onlyIsolated", False)),
@@ -151,7 +152,7 @@ def offline_specs(cfg: Config, limit: int | None = None) -> dict[str, MarketSpec
     specs = {}
     for a in cfg.assets[: limit or None]:
         lev = 10 if str(a.leverage).lower() == "max" else int(a.leverage)
-        mult = hip3_fee_multiplier(1.0, True) if a.dex else 1.0
+        mult = (hip3_fee_multiplier(1.0, True) if a.dex else 1.0) * cfg.fees.discount
         specs[a.coin] = MarketSpec(
             coin=a.coin, dex=a.dex, symbol=a.symbol, exchange_max_leverage=lev, leverage=lev,
             sz_decimals=2, only_isolated=bool(a.dex), growth_mode=bool(a.dex), deployer_fee_scale=1.0,

@@ -108,6 +108,12 @@ class FeesCfg:
     base_taker: float = 0.00045
     base_maker: float = 0.00015
     use_exchange_scaling: bool = True
+    staking_discount: float = 0.0      # HYPE staking tier: 0.05 … 0.40 (Wood … Diamond)
+    referral_discount: float = 0.0     # 0.04 with a referral code (first 25 M USD volume)
+
+    @property
+    def discount(self) -> float:
+        return (1 - max(0.0, min(self.staking_discount, 0.4))) * (1 - max(0.0, min(self.referral_discount, 0.1)))
 
 
 @dataclass
