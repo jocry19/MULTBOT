@@ -144,9 +144,25 @@ def test_risk_stop_always_before_liquidation(cfg):
 def test_hedge_rewards_shift_weight():
     h = Hedge(["a", "b"], eta=0.1, floor=0.01)
     for _ in range(50):
-        h.update({"a": 1.0, "b": -1.0})
+        h.update(np.array([1.0, -1.0]))
     w = h.weights()
     assert w["a"] > 0.9 and w["b"] >= 0.01
+
+
+def test_ewcorr_vec_matches_scalar():
+    from multbot.learning.stats import EWCorrVec
+    rng = np.random.default_rng(3)
+    vec, a, b = EWCorrVec(3, halflife=50), EWCorr(halflife=50), EWCorr(halflife=50)
+    for _ in range(400):
+        s = rng.normal(size=3)
+        r = 0.3 * s[0] - 0.2 * s[2] + rng.normal()
+        vec.add(np.array([0, 2]), s[[0, 2]], r)
+        a.add(s[0], r)
+        b.add(s[2], r)
+    c = vec.corr()
+    assert c[0] == pytest.approx(a.corr, abs=1e-12) and c[2] == pytest.approx(b.corr, abs=1e-12)
+    assert vec.n[1] == 0 and c[1] == 0.0
+    assert vec.tstat()[0] == pytest.approx(a.tstat, abs=1e-9)
 
 
 def test_online_logit_learns():
@@ -263,14 +279,20 @@ def test_backtest_end_to_end_accounting(cfg):
 def test_brain_persistence_roundtrip(cfg, tmp_path):
     specs = offline_specs(cfg)
     b = Brain(cfg, list(specs))
-    b.hedge_global.update({"ema_trend": 1.0})
+    r = np.zeros(len(b.keys))
+    r[b.keys.index("ema_trend")] = 1.0
+    b.hedge_global.update(r)
     b.ml.update(np.ones(len(b.ml.names)), 1.0)
+    coin = list(specs)[0]
+    b.ic_asset[coin].add(np.array([b.i_final]), np.array([0.5]), 1.0)
     path = tmp_path / "brain.json"
     b.save(path)
     b2 = Brain(cfg, list(specs))
     assert b2.load_file(path)
-    assert b2.hedge_global.logw["ema_trend"] == pytest.approx(b.hedge_global.logw["ema_trend"])
+    i = b.keys.index("ema_trend")
+    assert b2.hedge_global.logw[i] == pytest.approx(b.hedge_global.logw[i])
     assert b2.ml.n == 1
+    assert b2.ic_value("asset", coin)[1] == 1
 
 
 def test_engine_liquidation_in_tick_mode(cfg):
@@ -429,8 +451,8 @@ def test_expected_move_table_learns_per_bucket(cfg):
         brain.move.add(fav)
         brain._move_cell(sc, vol).add(fav)
     for _ in range(3000):                                               # live pre-training never feeds the table
-        brain.observe("A", 0, 100.0, 0.001, "TREND-HIGH", {"scores": {}, "ens": 0.5, "final": 0.5, "p_up": 0.6,
-                      "x": np.zeros(len(ML_FEATURES))}, {}, None, 1, 0.0, pretrain=True)
+        brain.observe("A", 0, 100.0, 0.001, "TREND-HIGH", {"s": np.zeros(len(brain.track)), "final": 0.5,
+                      "p_up": 0.6, "x": np.zeros(len(ML_FEATURES))}, {}, None, 1, 0.0, pretrain=True)
     n0 = brain.move.n
     for i in range(brain.H):
         brain.on_bar("A", 100.0 * (1 + 0.01 * (i + 1)), i)

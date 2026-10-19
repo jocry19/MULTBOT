@@ -1,7 +1,7 @@
-"""Multiplicative-weights (Hedge) over strategies, stored in log space."""
+"""Multiplicative-weights (Hedge) over strategies, stored in log space as a numpy vector."""
 from __future__ import annotations
 
-import math
+import numpy as np
 
 
 class Hedge:
@@ -10,45 +10,43 @@ class Hedge:
         self.eta = eta
         self.floor = floor
         self.decay = decay  # forgetting: old evidence fades (memory ≈ 1 / (1 − decay) updates)
-        self.logw = {k: 0.0 for k in self.keys}
+        self.logw = np.zeros(len(self.keys))
         self.n = 0
 
-    def update(self, rewards: dict[str, float]) -> None:
-        for k in self.logw:
-            self.logw[k] *= self.decay
-        for k, r in rewards.items():
-            if k in self.logw:
-                self.logw[k] += self.eta * max(-1.0, min(1.0, r))
-        m = sum(self.logw.values()) / max(len(self.logw), 1)
-        for k in self.logw:
-            self.logw[k] = max(-12.0, min(12.0, self.logw[k] - m))
+    def update(self, rewards: np.ndarray) -> None:
+        """``rewards`` is aligned with ``keys``."""
+        lw = self.logw * self.decay + self.eta * np.minimum(np.maximum(rewards, -1.0), 1.0)
+        lw -= lw.sum() / len(lw)
+        self.logw = np.minimum(np.maximum(lw, -12.0), 12.0)
         self.n += 1
 
     def weights(self) -> dict[str, float]:
-        return softmax_floor(self.logw, self.floor)
+        return dict(zip(self.keys, softmax_floor(self.logw, self.floor).tolist()))
 
     def to_dict(self) -> dict:
-        return {"logw": self.logw, "n": self.n}
+        return {"logw": dict(zip(self.keys, self.logw.tolist())), "n": self.n}
 
     def load(self, d: dict) -> None:
-        for k, v in (d.get("logw") or {}).items():
-            if k in self.logw:
-                self.logw[k] = float(v)
+        saved = d.get("logw") or {}
+        for i, k in enumerate(self.keys):
+            if k in saved:
+                self.logw[i] = float(saved[k])
         self.n = int(d.get("n", 0))
 
 
-def softmax_floor(logw: dict[str, float], floor: float) -> dict[str, float]:
-    if not logw:
-        return {}
-    mx = max(logw.values())
-    ex = {k: math.exp(v - mx) for k, v in logw.items()}
-    s = sum(ex.values())
-    n = len(ex)
-    return {k: (1 - floor * n) * v / s + floor if floor * n < 1 else 1.0 / n for k, v in ex.items()}
+def softmax_floor(logw: np.ndarray, floor: float) -> np.ndarray:
+    n = len(logw)
+    if not n:
+        return logw
+    ex = np.exp(logw - logw.max())
+    p = ex / ex.sum()
+    return (1 - floor * n) * p + floor if floor * n < 1 else np.full(n, 1.0 / n)
 
 
-def blend_logw(layers: list[tuple[dict[str, float], float]]) -> dict[str, float]:
+def blend_logw(layers: list[tuple[np.ndarray, float]]) -> np.ndarray:
     """Weighted average of several log-weight layers (global / regime / asset)."""
-    keys = layers[0][0].keys()
     tot = sum(w for _, w in layers) or 1.0
-    return {k: sum(l.get(k, 0.0) * w for l, w in layers) / tot for k in keys}
+    out = layers[0][0] * layers[0][1]
+    for lw, w in layers[1:]:
+        out = out + lw * w
+    return out / tot

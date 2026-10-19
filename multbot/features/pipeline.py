@@ -259,7 +259,10 @@ def row(f: dict[str, np.ndarray], i: int = -1) -> dict[str, float]:
 
 
 def ml_vector(r: dict[str, float]) -> np.ndarray:
-    return np.array([r.get(k, 0.0) for k in ML_FEATURES], dtype=float)
+    x = np.array([r.get(k, 0.0) for k in ML_FEATURES], dtype=float)
+    if not np.isfinite(x).all():
+        np.nan_to_num(x, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+    return x
 
 
 def hour_utc(ms: int) -> int:

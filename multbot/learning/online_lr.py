@@ -12,18 +12,19 @@ class RunningScaler:
         self.n = 0
         self.mean = np.zeros(dim)
         self.m2 = np.zeros(dim)
+        self.inv_sd = np.zeros(dim)   # cached 1 / σ (0 until two samples are seen)
 
     def update(self, x: np.ndarray) -> None:
         self.n += 1
         d = x - self.mean
         self.mean += d / self.n
         self.m2 += d * (x - self.mean)
+        if self.n >= 2:
+            self.inv_sd = 1.0 / (np.sqrt(self.m2 / (self.n - 1)) + 1e-9)
 
     def transform(self, x: np.ndarray) -> np.ndarray:
-        if self.n < 2:
-            return np.zeros_like(x)
-        sd = np.sqrt(self.m2 / (self.n - 1)) + 1e-9
-        return np.clip((x - self.mean) / sd, -5, 5)
+        z = (x - self.mean) * self.inv_sd
+        return np.minimum(np.maximum(z, -5.0), 5.0)
 
     def to_dict(self) -> dict:
         return {"n": self.n, "mean": self.mean.tolist(), "m2": self.m2.tolist()}
@@ -33,6 +34,8 @@ class RunningScaler:
             self.n = int(d["n"])
             self.mean = np.array(d["mean"], dtype=float)
             self.m2 = np.array(d["m2"], dtype=float)
+            if self.n >= 2:
+                self.inv_sd = 1.0 / (np.sqrt(self.m2 / (self.n - 1)) + 1e-9)
 
 
 class OnlineLogit:
@@ -50,11 +53,11 @@ class OnlineLogit:
         self.recent = deque(maxlen=400)  # (p, y)
 
     def predict(self, x: np.ndarray) -> float:
-        z = float(self.scaler.transform(np.nan_to_num(x)) @ self.w + self.b)
+        """``x`` must be finite (callers sanitise once, see ``features.pipeline.ml_vector``)."""
+        z = float(self.scaler.transform(x) @ self.w + self.b)
         return 1.0 / (1.0 + math.exp(-max(-30.0, min(30.0, z))))
 
     def update(self, x: np.ndarray, y: float, weight: float = 1.0) -> float:
-        x = np.nan_to_num(x)
         p = self.predict(x)
         self.recent.append((p, y))
         self.scaler.update(x)

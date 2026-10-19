@@ -286,13 +286,13 @@ class Engine:
         sc = self.cfg.signal
         b = self.brain
         if sc.market_gate_ic is not None:
-            ic = b.ic_asset.get("final", {}).get(coin)
-            if ic is not None and ic.n >= sc.gate_min_obs and ic.corr < sc.market_gate_ic:
-                return "Markt ohne Kante (IC)", f"eigene Signale hier bisher ohne Kante (IC {ic.corr:+.3f}, n={ic.n})"
+            ic, n = b.ic_value("asset", coin)
+            if n >= sc.gate_min_obs and ic < sc.market_gate_ic:
+                return "Markt ohne Kante (IC)", f"eigene Signale hier bisher ohne Kante (IC {ic:+.3f}, n={n})"
         if sc.regime_gate_ic is not None:
-            ic = b.ic_regime.get("final", {}).get(regime_label)
-            if ic is not None and ic.n >= sc.gate_min_obs and ic.corr < sc.regime_gate_ic:
-                return "Regime ohne Kante (IC)", f"Regime {regime_label} bisher ohne Kante (IC {ic.corr:+.3f})"
+            ic, n = b.ic_value("regime", regime_label)
+            if n >= sc.gate_min_obs and ic < sc.regime_gate_ic:
+                return "Regime ohne Kante (IC)", f"Regime {regime_label} bisher ohne Kante (IC {ic:+.3f})"
         return None
 
     def candidates(self, limit: int = 40) -> list[str]:

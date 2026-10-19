@@ -98,12 +98,7 @@ def create_app(cfg: Config, runner: BaseRunner) -> Starlette:
     async def brain(_: Request):
         if not runner.engine:
             return JSON({"ready": False})
-        d = runner.brain.snapshot()
-        # hundreds of markets: keep the per-market IC table to the best-observed ones
-        n_by_coin = {c: v.n for c, v in runner.brain.ic_asset.get("final", {}).items()}
-        top = set(sorted(n_by_coin, key=lambda c: -n_by_coin[c])[:30])
-        d["ic_asset"] = {k: {c: v for c, v in row.items() if c in top} for k, row in d.get("ic_asset", {}).items()}
-        d.pop("weights_asset", None)
+        d = runner.brain.snapshot(asset_limit=30)   # hundreds of markets: IC table of the best-observed ones
         d["ready"] = True
         d["catalog"] = catalog()
         d["feature_desc"] = FEATURES
