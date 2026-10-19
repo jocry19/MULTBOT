@@ -381,6 +381,9 @@ language:                       # Lebende Marktsprache (signal.mode: language) �
                                 # gewichtet wird live danach, welches zuletzt am besten vorhergesagt hat
   trust_prior: 0.10             # Skepsis: so groß darf eine Kante vorab höchstens sein (σ·√H). Er glaubt einer
                                 # Aussage erst, wenn sie sich oft genug bewahrheitet hat; kleiner = skeptischer
+  proof_sd: 0.0                 # Beweis-Anspruch: gehandelt wird Erwartung − so viele Standardabweichungen.
+                                # 0 = handelt, sobald er nach Kosten Gewinn erwartet (Standard). 1 = nur
+                                # Bewiesenes: im Walk-Forward schwieg er dann fast immer (kaum Trades).
   exit_on_reversal: false       # schließen, wenn die Sprache glaubwürdig das Gegenteil sagt (und das die Kosten schlägt)
 
 learning:

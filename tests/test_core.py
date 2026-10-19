@@ -741,9 +741,11 @@ def test_living_language_learns_meaning_trusts_only_what_came_true_and_forgets()
 
 def test_living_language_stays_silent_on_noise():
     from multbot.learning.language import MarketLanguage
-    lang = MarketLanguage(horizon=3, bars_per_hour=12)
+    lang = MarketLanguage(horizon=3, bars_per_hour=12, proof_sd=1.0)
     rng = np.random.default_rng(3)
     _language_world(lang, 2500, 0, rng, {})
     assert abs(lang.ic_value(True)) < 0.05
-    assert all(c["believed"] <= 0 for c in lang.snapshot()["trust"])        # nothing came true → nothing believed
+    assert all(c["believed"] <= 0 for c in lang.snapshot()["trust"])        # nothing proven → nothing believed
+    lang.proof_sd = 0.0                                                      # expectation only: sceptical prior
+    assert all(c["believed"] < 0.1 for c in lang.snapshot()["trust"])       # keeps lucky cells small
 

@@ -96,6 +96,7 @@ class LanguageCfg:
     max_words: int = 32                # largest vocabulary per sense (words are born and forgotten live)
     memory_days: list = field(default_factory=lambda: [1.0, 5.0, 25.0])   # three memories: half-life in days
     trust_prior: float = 0.10          # scepticism: how large a proven edge may be a priori (σ·√H units)
+    proof_sd: float = 0.0              # proof demanded: posterior mean − this many std. deviations (0 = expectation)
     exit_on_reversal: bool = False     # close when the language credibly says the opposite (beats the costs)
 
 

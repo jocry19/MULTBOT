@@ -65,7 +65,7 @@ class Brain:
         self.hedge_asset = {c: Hedge(self.keys, lc.hedge_eta, lc.hedge_floor, lc.hedge_decay) for c in self.coins}
         lg = cfg.language
         self.lang = MarketLanguage(self.H, HOUR_MS / INTERVAL_MS.get(sc.interval, 300_000), lg.max_words,
-                                   lg.memory_days, lg.trust_prior)
+                                   lg.memory_days, lg.trust_prior, lg.proof_sd)
         self.ml = OnlineLogit(ML_FEATURES, lc.lr, lc.l2)
         self.meta = OnlineLogit(META_FEATURES, lc.lr, lc.l2)
         self.arms = BetaVec(nt)

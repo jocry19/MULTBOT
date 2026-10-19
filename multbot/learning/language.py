@@ -30,9 +30,9 @@ weighted by how well each has predicted lately – the bot learns how fast the m
 **Speaking = trading, only if it came true.** Every statement is checked against what really happened. For each
 conviction level (how loud the statement is relative to everything the bot says) and direction it keeps the
 realised move – one observation per bar across all markets, so markets moving together do not count as
-independent evidence – and believes it only with Bayesian scepticism (prior: edges are small; it takes the
-posterior mean minus one standard deviation). The bot trades only when this *proven* move beats the costs. If its
-language stops coming true, it falls silent by itself.
+independent evidence – and believes it only with Bayesian scepticism (prior: edges are small). The bot trades
+only when this believed move beats the costs (``proof_sd`` > 0 demands a margin of proof on top). If its language
+stops coming true, it falls silent by itself.
 """
 from __future__ import annotations
 
@@ -276,11 +276,12 @@ class MarketLanguage:
     VERSION = 3
 
     def __init__(self, horizon: int, bars_per_hour: float = 12.0, max_words: int = 32,
-                 memory_days: tuple | list = (1.0, 5.0, 25.0), trust_prior: float = 0.10):
+                 memory_days: tuple | list = (1.0, 5.0, 25.0), trust_prior: float = 0.10, proof_sd: float = 0.0):
         self.H = int(horizon)
         self.bph = float(bars_per_hour)
         self.bar_ms = int(round(3_600_000 / self.bph))
         self.trust_prior = float(trust_prior)
+        self.proof_sd = float(proof_sd)
         self.stats_all = [s for _, _, st in CHANNELS for s in st]
         self.D = len(self.stats_all)
         pos = {s: i for i, s in enumerate(self.stats_all)}
@@ -467,7 +468,7 @@ class MarketLanguage:
 
         Bayesian scepticism: prior N(0, trust_prior²) on the true edge of this conviction level, the realised
         mean per bar as evidence (consecutive outcomes overlap → H bars count as one), and the bot only takes
-        what is *proven*: posterior mean minus one posterior standard deviation."""
+        what is *proven*: posterior mean minus ``proof_sd`` posterior standard deviations (0 = expected value)."""
         if cell < 0:
             return 0.0, 0.0, 0.0
         w, mean, var, _ = self.cell[cell]
@@ -478,7 +479,7 @@ class MarketLanguage:
         se2 = var / max(w / max(self.H, 1), 1e-9)
         tau2 = self.trust_prior ** 2
         shrink = tau2 / (tau2 + se2)
-        return float(mean * shrink - math.sqrt(se2 * shrink)), float(mean), float(w)
+        return float(mean * shrink - self.proof_sd * math.sqrt(se2 * shrink)), float(mean), float(w)
 
     # ── reading ──────────────────────────────────────────────────────────
     def read(self, coin: str, t: int, frow: dict, learn: bool = True, pretrain: bool = False,
@@ -698,7 +699,8 @@ class MarketLanguage:
             "mood_hist": list(self.mood_hist)[-96:], "senses": senses, "short": SHORT,
             "transitions": [{"sense": s, "codes": c, "text": tx, "meaning": round(m, 4), "evidence": round(n, 1)}
                             for _, s, c, tx, m, n in transitions[:top]],
-            "trust": cells, "trust_prior": self.trust_prior, "rms": round(self.rms, 4), "now": now,
+            "trust": cells, "trust_prior": self.trust_prior, "proof_sd": self.proof_sd, "rms": round(self.rms, 4),
+            "now": now,
             "curve": self.curve[-500:], "duplicates": DUPLICATES,
         }
 
