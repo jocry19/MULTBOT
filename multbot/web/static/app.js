@@ -861,7 +861,7 @@
     async update() {
       const L = await fetchCached("language", "/api/language", 5000);
       if (!L || !L.ready) return;
-      if (L.version !== 3) { set("lghead", '<p class="note">Die Sprache startet gerade neu …</p>'); return; }
+      if (!L.senses) { set("lghead", '<p class="note">Die Sprache startet gerade neu …</p>'); return; }
       const speaking = L.mode === "language";
       const mem = (L.memories || []).map((m) => `${esc(m.name)} ${pct(m.weight, 0)}`).join(" · ");
       set("lghead", `<div class="metrics">${metric("Modus", speaking ? "SPRICHT" : "hört nur zu", speaking ? "up" : "", speaking ? "entscheidet die Trades" : "Ensemble entscheidet (signal.mode)")}` +
