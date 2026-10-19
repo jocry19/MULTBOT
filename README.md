@@ -13,8 +13,7 @@ Terminal-Dashboard im Bloomberg-Stil.
 
 ## App öffnen – per Doppelklick
 
-Voraussetzung ist Python 3.10 oder neuer ([python.org](https://www.python.org/downloads/), unter Windows den
-Haken bei „Add python.exe to PATH“ setzen). Danach brauchst du keine Kommandozeile mehr:
+Du brauchst keine Kommandozeile und musst vorher auch kein Python installieren:
 
 | System | Starten |
 |---|---|
@@ -22,13 +21,24 @@ Haken bei „Add python.exe to PATH“ setzen). Danach brauchst du keine Kommand
 | **macOS** | `MULTBOT.command` doppelklicken (beim ersten Mal: Rechtsklick → Öffnen) |
 | **Linux** | `./start.sh` |
 
-Beim ersten Start legt das Skript selbst eine Python-Umgebung (`.venv`) an und installiert alle Pakete. Danach
-öffnet sich das Terminal als **eigenes App-Fenster** ohne Tabs und Adressleiste, sofern Chrome, Edge oder
-Brave installiert ist. Sonst öffnet es sich im Standardbrowser. Das schwarze Konsolenfenster zeigt das Log.
+Beim ersten Start richtet sich alles selbst ein (1–3 Minuten, Internet nötig):
+
+- Ein vorhandenes Python 3.10+ wird genutzt. Fehlt es, installiert das Skript Python automatisch über
+  [uv](https://docs.astral.sh/uv/), das offizielle Tool von Astral. Dafür sind keine Admin-Rechte nötig,
+  die Installation gilt nur für deinen Benutzer.
+- Das Skript legt eine eigene Umgebung (`.venv`) an und installiert die Pakete.
+- Auf dem Desktop erscheint ein **„MULTBOT“-Icon**. Damit startest du künftig.
+
+Danach öffnet sich das Terminal als **eigenes App-Fenster** ohne Tabs und Adressleiste, sofern Chrome, Edge
+oder Brave installiert ist. Sonst öffnet es sich im Standardbrowser. Das schwarze Konsolenfenster zeigt das Log.
 Schließt du es, ist der Bot beendet.
 
 Ein zweiter Doppelklick, während der Bot schon läuft, öffnet nur noch einmal das Terminal und startet keinen
 zweiten Bot.
+
+Windows zeigt bei Dateien aus dem Internet eventuell „Der Computer wurde durch Windows geschützt“. Klicke dann
+auf „Weitere Informationen“ und „Trotzdem ausführen“. Neu aufsetzen: den Ordner `.venv` löschen und erneut
+doppelklicken.
 
 **Noch bequemer:**
 

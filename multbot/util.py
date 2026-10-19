@@ -79,12 +79,21 @@ def floor_to_decimals(x: float, decimals: int) -> float:
 
 
 def ssl_context() -> ssl.SSLContext:
-    """Default SSL context that also honours SSL_CERT_FILE / REQUESTS_CA_BUNDLE (corporate proxies)."""
+    """SSL context: SSL_CERT_FILE / REQUESTS_CA_BUNDLE (corporate proxies) first, then certifi.
+
+    certifi matters on macOS, where python.org builds ship without system root certificates
+    and the WebSocket connection would otherwise fail verification.
+    """
     for var in ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"):
         path = os.environ.get(var)
         if path and os.path.exists(path):
             return ssl.create_default_context(cafile=path)
-    return ssl.create_default_context()
+    try:
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
 
 
 def setup_logging(level: str = "INFO") -> None:
