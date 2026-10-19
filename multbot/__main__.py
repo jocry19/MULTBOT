@@ -128,8 +128,9 @@ def cmd_run(args, sim: bool = False) -> None:
         return
     runner = SimRunner(cfg, speed=args.speed, seed=args.seed, markets=args.markets) if sim else LiveRunner(cfg)
     acc = cfg.account
-    capital = (f"{acc.position_margin_usd:g} USD je Position · max. {cfg.risk.max_open_positions} offen"
-               if acc.fixed else f"Startkapital {acc.starting_balance:g} USD")
+    n_pos = f"max. {cfg.risk.max_open_positions} offen" if cfg.risk.max_open_positions else "gerankt, unbegrenzt"
+    capital = (f"{acc.position_margin_usd:g} USD je Position · {n_pos}" if acc.fixed
+               else f"Startkapital {acc.starting_balance:g} USD")
     print(BANNER.replace("@CAPITAL@", capital))
     if args.no_web:
         asyncio.run(_headless(runner))

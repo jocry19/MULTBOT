@@ -199,7 +199,8 @@ def print_summary(rep: dict) -> None:
     cf = rep.get("config", {})
     if cf.get("mode") == "fixed" and tr.get("n"):
         print(f"\nModus      jede Position {cf.get('position_margin_usd', 100):.0f} USD Margin × max. Hebel, "
-              f"max. {cf.get('max_open_positions')} offen, Kapital unbegrenzt")
+              + (f"max. {cf['max_open_positions']} offen" if cf.get("max_open_positions") else
+                 "beliebig viele offen (gerankt nach erwarteter Rendite)") + ", Kapital unbegrenzt")
         print(f"OOS-PnL    {tr['net']:+.2f} USD  (Ø {tr['expectancy']:+.2f} USD/Trade, "
               f"{tr['net'] / max(cf.get('starting_balance', 500), 1) * 100:+.1f}% auf {cf.get('starting_balance', 500):.0f} USD Referenz)")
     print(f"\nOOS        Rendite {pct(m.get('chained_return'))}  Sharpe {m.get('sharpe', 0):.2f}  "

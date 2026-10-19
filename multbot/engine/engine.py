@@ -703,7 +703,8 @@ class Engine:
             "max_leverage": s.exchange_max_leverage, "taker_fee": s.taker_fee, "asset_class": s.asset_class,
             "ready": self.ready is None or coin in self.ready,
             "px": self.last_px.get(coin, v.px), "t": v.t, "bars": v.bars, "regime": v.regime, "final": v.final,
-            "ens": v.ens, "p_up": v.p_up, "pwin": v.pwin, "agreement": v.agreement, "coverage": v.coverage,
+            "ens": v.ens, "p_up": v.p_up, "pwin": v.pwin, "exp_roe": v.exp_roe, "agreement": v.agreement,
+            "coverage": v.coverage,
             "contrib": v.contrib, "signals": v.signals, "features": v.features, "status": v.status,
             "history": list(v.history)[-120:], "ctx": m.ctx_snapshot() if m else {},
         }

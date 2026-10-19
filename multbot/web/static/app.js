@@ -138,8 +138,8 @@
       $("#top-pnl").innerHTML = `<span class="${cls(ac.realized)}">${sgn(ac.realized)}</span> / <span class="${cls(ac.upnl)}">${sgn(ac.upnl)}</span>`;
       $("#lbl-epoch").textContent = "MODUS";
       const mp = (A.cache.cfg && A.cache.cfg.config.account.position_margin_usd) || 100;
-      const mx = (A.cache.cfg && A.cache.cfg.config.risk.max_open_positions) || 5;
-      $("#top-epoch").textContent = `${mx}×${mp}$`;
+      const mx = A.cache.cfg && A.cache.cfg.config.risk.max_open_positions;
+      $("#top-epoch").textContent = `${mx || "∞"}×${mp}$`;
     } else {
       $("#lbl-eq").textContent = "EQUITY";
       $("#top-eq").textContent = usd(ac.equity);
@@ -290,7 +290,7 @@
   const SORTERS = {
     sym: (a) => a.symbol, lev: (a) => a.lev, px: (a) => a.px, chg: (a) => a.chg ?? -9, fund: (a) => a.fund ?? 0,
     vol: (a) => a.vol ?? 0, oi: (a) => a.oi ?? 0, spr: (a) => a.spread ?? 0, score: (a) => Math.abs(a.final || 0),
-    pup: (a) => a.p_up ?? 0, pwin: (a) => a.pwin ?? -1, st: (a) => a.status, cls: (a) => a.cls,
+    pup: (a) => a.p_up ?? 0, pwin: (a) => a.pwin ?? -1, eroe: (a) => a.eroe ?? -9, st: (a) => a.status, cls: (a) => a.cls,
   };
   function watchTable(S) {
     const held = new Set(S.positions.map((p) => p.coin).concat((S.orders || []).map((o) => o.coin)));
@@ -314,11 +314,12 @@
         `<td>${kusd(a.vol)}</td><td>${kusd(a.oi)}</td><td>${f(a.spread, 1)}</td>` +
         `<td class="l">${esc(a.regime || "-")}${a.tradable === false ? ' <span class="tag warn">ZU</span>' : ""}</td>` +
         `<td>${sbar(a.final)} <span class="${cls(a.final)}">${sgn(a.final)}</span></td><td>${pct(a.p_up, 0)}</td><td>${a.pwin === null || a.pwin === undefined ? "-" : pct(a.pwin, 0)}</td>` +
+        `<td class="${cls(a.eroe)}">${isNum(a.eroe) ? spct(a.eroe, 1) : "-"}</td>` +
         `<td class="l ${stc}" title="${esc(st)}">${esc(st.slice(0, 34))}</td></tr>`;
     });
     const h = (k, label, l) => `<th class="${l ? "l" : ""}" data-sort="${k}" style="cursor:pointer">${label}${A.wsort.key === k ? (A.wsort.dir < 0 ? " ▼" : " ▲") : ""}</th>`;
     return `<table class="t"><thead><tr>${h("sym", "Markt", 1)}${h("cls", "Klasse", 1)}${h("lev", "Hebel")}${h("px", "Mark")}${h("chg", "24h")}${h("fund", "Fund 8h")}<th>Fund p.a.</th>` +
-      `${h("vol", "Vol 24h")}${h("oi", "OI")}${h("spr", "Spr bps")}<th class="l">Regime</th>${h("score", "Ensemble-Score")}${h("pup", "P(↑)")}${h("pwin", "P(Gew)")}${h("st", "Status", 1)}</tr></thead>` +
+      `${h("vol", "Vol 24h")}${h("oi", "OI")}${h("spr", "Spr bps")}<th class="l">Regime</th>${h("score", "Ensemble-Score")}${h("pup", "P(↑)")}${h("pwin", "P(Gew)")}${h("eroe", "E[ROE]")}${h("st", "Status", 1)}</tr></thead>` +
       `<tbody>${rows.join("")}</tbody></table>` + (total > list.length ? `<p class="note" style="padding:4px 8px">${list.length} von ${total} Märkten – Filter oder „alle“ wählen.</p>` : "");
   }
 
@@ -326,12 +327,12 @@
     const a = S.account;
     const pnl = a.equity - a.start;
     if (a.mode === "fixed") {
-      const cf = (A.cache.cfg && A.cache.cfg.config) || { account: { position_margin_usd: 100 }, risk: { max_open_positions: 5 } };
-      const mp = cf.account.position_margin_usd, mx = cf.risk.max_open_positions;
+      const cf = (A.cache.cfg && A.cache.cfg.config) || { account: { position_margin_usd: 100 }, risk: { max_open_positions: null }, signal: {} };
+      const mp = cf.account.position_margin_usd, mx = cf.risk.max_open_positions, sg = cf.signal || {};
       return `<div class="metrics">` +
         metric("PnL gesamt", sgn(pnl) + " $", cls(pnl), "realisiert + offen") +
         metric("Realisiert", sgn(a.realized) + " $", cls(a.realized), `${a.trades} Trades`) +
-        metric("Offen (uPnL)", sgn(a.upnl) + " $", cls(a.upnl), `${a.positions}/${mx} Positionen`) +
+        metric("Offen (uPnL)", sgn(a.upnl) + " $", cls(a.upnl), mx ? `${a.positions}/${mx} Positionen` : `${a.positions} Positionen`) +
         metric("Ø pro Trade", sgn(a.avg_net) + " $", cls(a.avg_net), "netto nach Kosten") +
         metric("Ø ROE/Trade", a.avg_net === null || a.avg_net === undefined ? "-" : spct(a.avg_net / mp, 1), cls(a.avg_net), `auf ${mp} $ Margin`) +
         metric("Trefferquote", pct(a.win_rate, 1), (a.win_rate || 0) >= 0.5 ? "up" : "") +
@@ -341,7 +342,10 @@
         metric("Gebühren", usd(a.fees, 2), "down") +
         metric("Funding", usd(-a.funding, 2), cls(-a.funding), a.funding > 0 ? "bezahlt" : "erhalten") +
         metric("Liquidationen", a.liquidations, a.liquidations ? "down" : "") +
-        `</div><p class="note" style="margin-top:6px">Kapital <b>unbegrenzt</b> · jede Position <b>${mp} USD Margin × maximaler Hebel</b> · max. <b>${mx}</b> gleichzeitig. Prozentwerte beziehen sich auf ${mx} × ${mp} = ${usd(mp * mx, 0)} Referenzkapital.</p>` +
+        `</div><p class="note" style="margin-top:6px">Kapital <b>unbegrenzt</b> · jede Position <b>${mp} USD Margin × maximaler Hebel</b> · ` +
+        (mx ? `max. <b>${mx}</b> gleichzeitig` : `<b>beliebig viele</b> gleichzeitig`) +
+        (sg.rank_entries ? ` · Kandidaten jeder Bar <b>gerankt nach erwarteter Rendite</b> (Bewegung × Hebel − Kosten)` + (isNum(sg.min_exp_roe) ? `, mindestens ${spct(sg.min_exp_roe, 1)} auf die Margin` : "") : "") +
+        `. Prozentwerte beziehen sich auf ${usd(a.start, 0)} Referenzkapital.</p>` +
         (S.paused ? '<p><span class="tag warn">PAUSIERT</span> RESUME &lt;GO&gt; zum Fortsetzen</p>' : "");
     }
     return `<div class="metrics">` +
@@ -390,7 +394,7 @@
         (compact ? "" : `<td>${pct(stopD, 2)}</td><td class="${cls(p.r)}">${sgn(p.r)}R</td><td>${pct(p.mae, 2)} / ${pct(p.mfe, 2)}</td><td class="${cls(-p.funding)}">${f(-p.funding, 4)}</td><td>${dur(p.age_min)}</td>`) + `</tr>`;
     });
     const orows = O.map((o) => `<tr><td class="l cyan">${esc(o.coin.replace("xyz:", ""))}</td><td class="l"><span class="tag info">LIMIT ${o.side > 0 ? "BUY" : "SELL"}</span> ${o.leverage}x</td>` +
-      `<td>${px(o.limit)}</td><td colspan="${compact ? 5 : 13}" class="l dim">Größe ${o.size} · Margin ${usd(o.margin)} · ${o.bars} Bar(s) alt · ${esc(o.regime)}</td></tr>`);
+      `<td>${px(o.limit)}</td><td colspan="${compact ? 5 : 13}" class="l dim">Größe ${o.size} · Margin ${usd(o.margin)} · ${o.bars} Bar(s) alt · ${esc(o.regime)}${o.exp && isNum(o.exp.exp_roe) ? ` · E[ROE] ${spct(o.exp.exp_roe, 1)}` + (o.exp.rank ? ` (Rang ${o.exp.rank[0]}/${o.exp.rank[1]})` : "") : ""}</td></tr>`);
     return `<table class="t"><thead><tr><th class="l">Markt</th><th class="l">Seite</th><th>Einstieg</th><th>Mark</th><th>uPnL</th><th>ROE</th>` +
       (compact ? "" : "<th>Notional</th><th>Margin</th><th>Stop</th><th>TP</th>") + `<th>Liq-Preis</th><th>Abst. Liq</th>` +
       (compact ? "" : "<th>Abst. Stop</th><th>R</th><th>MAE / MFE</th><th>Funding</th><th>Alter</th>") + `</tr></thead><tbody>${rows.join("")}${orows.join("")}</tbody></table>`;
@@ -543,7 +547,7 @@
     return `<table class="t"><thead><tr><th class="l">Strategie</th><th class="l">Familie</th><th>Score</th><th></th><th>Gewicht</th><th>Beitrag</th><th class="l">Begründung</th></tr></thead><tbody>` +
       rows.map((r) => `<tr><td class="l amber">${esc(stratName(r.k))}</td><td class="l dim">${esc(fam(r.k))}</td><td class="${cls(r.s)}">${sgn(r.s)}</td><td>${sbar(r.s, 70)}</td>` +
         `<td><span class="mbar" style="width:${Math.min(60, r.w * 300)}px"></span> ${pct(r.w, 1)}</td><td class="${cls(r.s * r.w)}">${sgn(r.s * r.w, 3)}</td><td class="l dim">${esc(r.why)}</td></tr>`).join("") +
-      `</tbody></table><div class="note" style="padding:4px 8px">Ensemble ${sgn(v.ens)} · ML P(↑) ${pct(v.p_up, 1)} · FINAL <b class="${cls(v.final)}">${sgn(v.final)}</b> · Einigkeit ${pct(v.agreement, 0)} · Abdeckung ${pct(v.coverage, 0)} · P(Gewinn) ${v.pwin === null || v.pwin === undefined ? "Meta-Modell lernt noch" : pct(v.pwin, 1)}</div>`;
+      `</tbody></table><div class="note" style="padding:4px 8px">Ensemble ${sgn(v.ens)} · ML P(↑) ${pct(v.p_up, 1)} · FINAL <b class="${cls(v.final)}">${sgn(v.final)}</b> · Einigkeit ${pct(v.agreement, 0)} · Abdeckung ${pct(v.coverage, 0)} · P(Gewinn) ${v.pwin === null || v.pwin === undefined ? "Meta-Modell lernt noch" : pct(v.pwin, 1)} · E[ROE] ${isNum(v.exp_roe) ? `<b class="${cls(v.exp_roe)}">${spct(v.exp_roe, 1)}</b> auf die Margin (${v.leverage}x)` : "-"}</div>`;
   }
 
   function featHtml(d) {
@@ -865,6 +869,7 @@
         ["Größe", t.size], ["Margin", usd(t.margin)], ["PnL brutto", sgn(t.pnl)], ["Gebühren", f(t.fees, 4)], ["Funding", f(-t.funding, 4)], ["Netto", `<b class="${cls(t.net)}">${sgn(t.net)}</b> (${spct(t.roe, 1)} ROE)`],
         ["R-Multiple", sgn(t.r_multiple)], ["MAE / MFE", `${pct(t.mae, 2)} / ${pct(t.mfe, 2)}`], ["Regime", esc(t.regime)], ["Score", sgn(t.score)], ["P(Gewinn)", t.pwin === null ? "-" : pct(t.pwin, 1)],
         ["Init-Stop / TP", `${px(d.init_stop)} / ${px(d.tp)}`], ["ATR", px(d.atr)], ["Ensemble / P(↑)", `${sgn(dec.ens)} / ${pct(dec.p_up, 1)}`], ["Einigkeit", pct(dec.agreement, 0)],
+        ["Erwartet (E[ROE])", isNum(dec.exp_roe) ? `${spct(dec.exp_roe, 1)} auf die Margin · Bewegung ${spct(dec.exp_move, 3)}` + (dec.rank ? ` · Rang ${dec.rank[0]}/${dec.rank[1]}` : "") : "-"],
         ["Margin-Anteil", pct(dec.margin_pct, 1)], ["Ausführung", esc(dec.fill || "-")]].map(([k, v]) => `<tr><td class="l dim">${k}</td><td>${v}</td></tr>`).join("")}</tbody></table>` +
       `<p class="amber" style="margin:8px 0 2px">Beiträge zur Entscheidung</p>` + ((dec.contrib || []).map(([k, c]) => `<div>${sbar(c * 4, 70)} <span class="${cls(c)}">${sgn(c, 3)}</span> ${esc(stratName(k))}</div>`).join("") || '<span class="dim">-</span>') +
       ((dec.notes || []).length ? `<p class="note">${dec.notes.map(esc).join(" · ")}</p>` : ""));
