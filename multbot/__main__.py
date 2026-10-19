@@ -12,20 +12,23 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import shutil
 import signal
 import sys
+from pathlib import Path
 
+from . import __version__
 from .config import load_config
 from .util import fmt_ts, setup_logging
 
 log = logging.getLogger("multbot")
 
 BANNER = r"""
- __  __ _   _ _   _____ ____   ___ _____
-|  \/  | | | | | |_   _| __ ) / _ \_   _|   Perpetual Signal Bot · Paper-Trading
-| |\/| | | | | |   | | |  _ \| | | || |     Hyperliquid (inkl. HIP-3 xyz) · max. Hebel
-| |  | | |_| | |___| | | |_) | |_| || |     @CAPITAL@ · selbstlernend
-|_|  |_|\___/|_____|_| |____/ \___/ |_|     NUR SIMULATION – keine echten Orders
+ __  __ _   _ _   _____    ___  ____
+|  \/  | | | | | |_   _|  / _ \|___ \    Perpetual Signal Bot · Paper-Trading · v@VERSION@
+| |\/| | | | | |   | |   | | | | __) |   Hyperliquid (inkl. HIP-3 xyz) · max. Hebel
+| |  | | |_| | |___| |   | |_| |/ __/    @CAPITAL@ · selbstlernend
+|_|  |_|\___/|_____|_|    \__\_\_____|   NUR SIMULATION – keine echten Orders
 """
 
 
@@ -83,7 +86,7 @@ async def _serve(cfg, runner, host: str, port: int, open_mode: str | None) -> No
 
 
 def _already_running(port: int) -> bool:
-    """True if a MULTBOT terminal already answers on this port (second double-click just opens it)."""
+    """True if a MULT Q2 terminal already answers on this port (second double-click just opens it)."""
     import json
     import urllib.request
 
@@ -104,11 +107,27 @@ async def _headless(runner) -> None:
     await runner.run()
 
 
+def migrate_old_data(data_dir: str, old_dirs=("../MULTBOT/data", "../multbot/data")) -> Path | None:
+    """First start of MULT Q2 next to an old MULTBOT folder: take over its account, positions and trades."""
+    target = Path(data_dir)
+    if target.exists():
+        return None
+    for cand in old_dirs:
+        src = Path(cand)
+        if src.is_dir() and any(src.glob("*.db")):
+            shutil.copytree(src, target)
+            print(f"Daten aus {src.resolve()} übernommen (Konto, offene Positionen, Trades).")
+            return src
+    return None
+
+
 def cmd_run(args, sim: bool = False) -> None:
     cfg = load_config(args.config)
     cfg._path = args.config
     if args.data_dir:
         cfg.data_dir = args.data_dir
+    elif not sim:
+        migrate_old_data(cfg.data_dir)
     from .engine.runner import LiveRunner, SimRunner
 
     host = args.host or ("0.0.0.0" if args.lan else cfg.web.host)
@@ -118,7 +137,7 @@ def cmd_run(args, sim: bool = False) -> None:
         from .launcher import open_app
 
         url = f"http://127.0.0.1:{port}"
-        print(f"MULTBOT läuft bereits auf {url} – öffne nur das Terminal.")
+        print(f"MULT Q2 läuft bereits auf {url} – öffne nur das Terminal.")
         if open_mode == "app":
             open_app(url)
         elif open_mode == "browser":
@@ -131,7 +150,7 @@ def cmd_run(args, sim: bool = False) -> None:
     n_pos = f"max. {cfg.risk.max_open_positions} offen" if cfg.risk.max_open_positions else "gerankt, unbegrenzt"
     capital = (f"{acc.position_margin_usd:g} USD je Position · {n_pos}" if acc.fixed
                else f"Startkapital {acc.starting_balance:g} USD")
-    print(BANNER.replace("@CAPITAL@", capital))
+    print(BANNER.replace("@CAPITAL@", capital).replace("@VERSION@", __version__))
     if args.no_web:
         asyncio.run(_headless(runner))
     else:
@@ -143,7 +162,7 @@ def cmd_shortcut(args) -> None:
 
     extra = " sim" if args.sim else " run"
     path = create_shortcut(args.dir, args.python, args=extra.strip() + " --app" + (" --lan" if args.lan else ""),
-                           name="MULTBOT Simulation" if args.sim else "MULTBOT")
+                           name="MULT Q2 Simulation" if args.sim else "MULT Q2")
     print(f"Verknüpfung erstellt: {path}")
     print("Doppelklick startet den Bot und öffnet das Terminal als eigenes App-Fenster.")
 
@@ -237,7 +256,7 @@ def _ensure_project_dir(args) -> None:
 
 
 def main(argv=None) -> None:
-    p = argparse.ArgumentParser(prog="multbot", description="MULTBOT – Perpetual Signal Bot (Paper-Trading)")
+    p = argparse.ArgumentParser(prog="multbot", description="MULT Q2 – Perpetual Signal Bot (Paper-Trading)")
     p.add_argument("--config", default="config.yaml")
     p.add_argument("--data-dir", default=None)
     p.add_argument("--log", default="INFO")

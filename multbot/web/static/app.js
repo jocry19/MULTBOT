@@ -1,4 +1,4 @@
-/* MULTBOT Terminal – Bloomberg-style front end for the paper-trading engine. */
+/* MULT Q2 Terminal – Bloomberg-style front end for the paper-trading engine. */
 (function () {
   "use strict";
   const $ = (s) => document.querySelector(s);
@@ -225,7 +225,7 @@
     if (!S.ready) {
       const st = (S.info && S.info.status) || {};
       if (A.built !== "SPLASH") { page.innerHTML = '<div class="splash" id="splash"></div>'; A.built = "SPLASH"; }
-      $("#splash").innerHTML = `<div class="big">MULTBOT</div><p class="dim">${esc(st.phase || "")}</p><p>${esc(st.msg || "")}</p>` +
+      $("#splash").innerHTML = `<div class="big">MULT Q2</div><p class="dim">${esc(st.phase || "")}</p><p>${esc(st.msg || "")}</p>` +
         `<div class="progress" style="max-width:420px;margin:10px auto"><i style="width:${(st.progress || 0) * 100}%"></i></div>` +
         `<p class="note">Beim ersten Start wird die Historie geladen und der komplette Lern-Stack per Walk-Forward-Backtest vortrainiert.</p>`;
       return;
@@ -991,7 +991,7 @@
     installEvt = null;
     $("#install").hidden = true;
   };
-  window.addEventListener("appinstalled", () => { $("#install").hidden = true; status("MULTBOT als App installiert"); });
+  window.addEventListener("appinstalled", () => { $("#install").hidden = true; status("MULT Q2 als App installiert"); });
   if ("serviceWorker" in navigator && (location.protocol === "https:" || ["localhost", "127.0.0.1"].includes(location.hostname))) {
     navigator.serviceWorker.register("/sw.js").catch(() => { /* app install optional */ });
   }

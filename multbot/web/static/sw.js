@@ -1,6 +1,6 @@
-/* MULTBOT service worker: makes the terminal installable as an app and keeps the shell available.
+/* MULT Q2 service worker: makes the terminal installable as an app and keeps the shell available.
    Live data (/api, /ws) always comes from the network. */
-const SHELL = "multbot-shell-v1";
+const SHELL = "mult-q2-v1";
 const ASSETS = ["/", "/static/style.css", "/static/charts.js", "/static/app.js", "/static/icon-192.png",
   "/static/icon-512.png", "/manifest.webmanifest"];
 

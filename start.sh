@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MULTBOT starten (Linux/macOS).
+# MULT Q2 starten (Linux/macOS).
 # Erster Start: nutzt vorhandenes Python 3.10+, sonst wird Python automatisch über "uv"
 # (offizielles Tool von Astral, ohne Admin-Rechte) installiert. Danach Pakete installieren,
 # Desktop-Icon anlegen und das Terminal als App-Fenster öffnen. Strg+C beendet den Bot.
@@ -38,23 +38,23 @@ find_uv() {
 
 if [ ! -x "$VPY" ]; then
   FIRST=1
-  echo "[MULTBOT] Erster Start – richte alles ein (einmalig, ca. 1–3 Minuten) ..."
+  echo "[MULT Q2] Erster Start – richte alles ein (einmalig, ca. 1–3 Minuten) ..."
   if PY="$(find_python)" && "$PY" -m venv .venv 2>/dev/null && [ -x "$VPY" ]; then
-    echo "[MULTBOT] Python gefunden: $PY"
+    echo "[MULT Q2] Python gefunden: $PY"
   else
     rm -rf .venv
-    echo "[MULTBOT] Kein passendes Python – installiere Python automatisch (ohne Admin-Rechte) ..."
+    echo "[MULT Q2] Kein passendes Python – installiere Python automatisch (ohne Admin-Rechte) ..."
     UV="$(find_uv)" || { curl -LsSf https://astral.sh/uv/install.sh | sh; UV="$(find_uv)"; } || {
-      echo "[MULTBOT] Python konnte nicht installiert werden – bitte von https://www.python.org/downloads/ installieren."
+      echo "[MULT Q2] Python konnte nicht installiert werden – bitte von https://www.python.org/downloads/ installieren."
       exit 1
     }
     "$UV" venv --seed --python 3.12 .venv || exit 1
   fi
 fi
 
-echo "[MULTBOT] Prüfe Pakete ..."
+echo "[MULT Q2] Prüfe Pakete ..."
 "$VPY" -m pip install --disable-pip-version-check -q -r requirements.txt || {
-  echo "[MULTBOT] Paketinstallation fehlgeschlagen – Internet prüfen. Neu aufsetzen: Ordner .venv löschen."
+  echo "[MULT Q2] Paketinstallation fehlgeschlagen – Internet prüfen. Neu aufsetzen: Ordner .venv löschen."
   exit 1
 }
 if [ -n "$FIRST" ]; then "$VPY" -m multbot shortcut || true; fi

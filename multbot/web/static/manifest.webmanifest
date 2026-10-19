@@ -1,6 +1,6 @@
 {
-  "name": "MULTBOT Terminal",
-  "short_name": "MULTBOT",
+  "name": "MULT Q2 Terminal",
+  "short_name": "MULT Q2",
   "description": "Perpetual Signal Bot – Paper-Trading auf Hyperliquid mit 100 USD und maximalem Hebel",
   "start_url": "/",
   "scope": "/",

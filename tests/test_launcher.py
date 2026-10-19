@@ -35,3 +35,16 @@ def test_pwa_assets_present():
         assert (static / Path(icon["src"]).name).exists()
     for name in ("sw.js", "favicon.ico", "apple-touch-icon.png"):
         assert (static / name).exists()
+
+
+def test_migrate_old_data(tmp_path, monkeypatch):
+    from multbot.__main__ import migrate_old_data
+    old = tmp_path / "MULTBOT" / "data"
+    old.mkdir(parents=True)
+    (old / "live.db").write_bytes(b"x")
+    new = tmp_path / "MULT-Q2"
+    new.mkdir()
+    monkeypatch.chdir(new)
+    assert migrate_old_data("data") is not None
+    assert (new / "data" / "live.db").read_bytes() == b"x"
+    assert migrate_old_data("data") is None          # never overwrites existing data

@@ -1,4 +1,4 @@
-/* MULTBOT – minimal canvas charting (no external dependencies). */
+/* MULT Q2 – minimal canvas charting (no external dependencies). */
 (function () {
   "use strict";
   const C = {

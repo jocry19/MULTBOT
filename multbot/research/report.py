@@ -191,7 +191,7 @@ def print_summary(rep: dict) -> None:
         return "-" if x is None else f"{x * 100:+.2f}%"
 
     p = rep["period"]
-    print("\n══════════════ MULTBOT RESEARCH ══════════════")
+    print("\n══════════════ MULT Q2 RESEARCH ══════════════")
     print(f"Zeitraum   {fmt_ts(p['start'])} → {fmt_ts(p['end'])}  ({p['bars']} Bars {rep['interval']}, "
           f"{p['elapsed_s']}s)")
     print(f"Lernphase  bis {fmt_ts(p['train_end'])} (nur lernen), danach out-of-sample handeln")

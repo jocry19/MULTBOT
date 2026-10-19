@@ -88,7 +88,7 @@ def desktop_dir() -> Path:
 
 
 def create_shortcut(target_dir: Path | None = None, python: str | None = None, args: str = "run --app",
-                    name: str = "MULTBOT") -> Path:
+                    name: str = "MULT Q2") -> Path:
     """Create a desktop shortcut that starts the bot and opens the terminal as an app window."""
     target_dir = Path(target_dir) if target_dir else desktop_dir()
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -99,7 +99,7 @@ def create_shortcut(target_dir: Path | None = None, python: str | None = None, a
         ps = (
             "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{lnk}');"
             "$s.TargetPath='{py}';$s.Arguments='-m multbot {args}';$s.WorkingDirectory='{wd}';"
-            "$s.IconLocation='{ico}';$s.Description='MULTBOT Perp Signal Terminal';$s.Save()"
+            "$s.IconLocation='{ico}';$s.Description='MULT Q2 Perp Signal Terminal';$s.Save()"
         ).format(lnk=str(path).replace("'", "''"), py=python.replace("'", "''"), args=args,
                  wd=str(REPO_DIR).replace("'", "''"), ico=str(ICON_DIR / "favicon.ico").replace("'", "''"))
         subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], check=True)
@@ -109,9 +109,9 @@ def create_shortcut(target_dir: Path | None = None, python: str | None = None, a
         path.write_text(f'#!/bin/bash\ncd "{REPO_DIR}"\n"{python}" -m multbot {args}\n', encoding="utf-8")
         path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
         return path
-    path = target_dir / f"{name.lower()}.desktop"
+    path = target_dir / f"{name.lower().replace(' ', '-')}.desktop"
     path.write_text(
-        "[Desktop Entry]\nType=Application\nName=MULTBOT\nComment=Perp Signal Terminal (Paper-Trading)\n"
+        f"[Desktop Entry]\nType=Application\nName={name}\nComment=Perp Signal Terminal (Paper-Trading)\n"
         f'Exec=sh -c \'cd "{REPO_DIR}" && "{python}" -m multbot {args}\'\n'
         f"Icon={ICON_DIR / 'icon-512.png'}\nTerminal=true\nCategories=Finance;Office;\n",
         encoding="utf-8",
