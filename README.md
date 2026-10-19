@@ -290,7 +290,8 @@ eine einfache, stabile Kante, die nach allen Kosten übrig bleibt?
 - **Bewertung:** Ein ✓ gibt es nur, wenn eine Hypothese in beiden Zeithälften und in beiden Rechenweisen
   positiv ist. Daneben steht, wie viele ✓ allein durch Zufall zu erwarten wären.
 
-**Ergebnis der Entwicklung (Stand Okt. 2026, 58–120 Märkte, 24. März – 19. Okt. 2026):**
+**Ergebnis der Entwicklung (Stand Okt. 2026: 111 Märkte, davon 57 Krypto und 54 Aktien/ETF/Index/Rohstoff/FX,
+24. März – 19. Okt. 2026):**
 
 - **Kurze Haltedauern verlieren durchweg.** Das gilt für alles unter 4 h, quer durch alle Familien, oft mit
   t-Werten unter −3. Die Kosten von ~3 bps (xyz) bis ~7 bps (Krypto) je Round-Trip sind größer als jede
@@ -301,9 +302,10 @@ eine einfache, stabile Kante, die nach allen Kosten übrig bleibt?
 - **Momentum über mehrere Tage ist als Signal leicht positiv.** Mit Maximalhebel wird es aber ausgestoppt:
   Bei 10–50x liegt die Liquidation nur 1–5 % entfernt, Tagesschwankungen sind größer. In den Märkten mit wenig
   Hebel (3–5x) bleibt nichts Stabiles übrig.
-- **Gesamtbilanz:** 2 von 92 Tests bestehen. Das ist weniger, als der Zufall erwarten lässt. Die beiden sind
-  Aktien-Perps über das Wochenende long, mit nur ~30 Wochenenden in den Daten. Positiv ist sonst nur der
-  Markt-Trend selbst (immer long, 48 h). Das ist Beta dieses Zeitraums, keine Strategie.
+- **Gesamtbilanz:** 1 von 92 Tests besteht: Aktien-Perps über das Wochenende long, 48 h Haltedauer, bei nur
+  ~30 Wochenenden in den Daten. Das ist weit weniger, als der Zufall erwarten lässt. Mit 58 Märkten war der
+  Markt-Trend (immer long, 48 h) noch positiv. Mit 111 Märkten ist er es in der ersten Hälfte nicht mehr. Er
+  war Beta dieses Zeitraums, keine Strategie.
 
 > **Fazit:** Mit öffentlichen Preis- und Funding-Daten, Taker-/Maker-Gebühren von Tier 0 und erzwungenem
 > Maximalhebel gibt es in diesem Zeitraum keine einfache, stabile Kante. Der Bot lernt live weiter, und das

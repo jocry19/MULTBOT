@@ -380,6 +380,8 @@ learning:
   l2: 0.0005
   meta_min_samples: 200
   pretrain_on_history: true     # beim Start auf Historie vortrainieren (nur neue Bars)
+  clean_replay: true            # sobald alle Märkte geladen sind: zeitlich verschränkt neu lernen (ohne
+                                # markt-übergreifenden Zukunfts-Leak) und das Warmstart-Modell ersetzen
   live_history_bars: 600        # Live-Start: Historie je Markt (wird im Hintergrund nach Volumen geladen)
   history_bars: 4000            # Research: Historie je Markt
   persist_every_s: 60

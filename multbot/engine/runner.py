@@ -527,8 +527,64 @@ class LiveRunner(BaseRunner):
 
         await asyncio.gather(*(worker() for _ in range(4)))
         if not self._stop.is_set():
+            if self.cfg.learning.clean_replay and self.brain.n_clean < 2000:
+                try:
+                    await self._clean_replay()
+                except Exception:  # noqa: BLE001 – the warm-start brain keeps working
+                    log.exception("Verschränktes Vortraining fehlgeschlagen – Warmstart-Lernstand bleibt aktiv")
             self.brain.save(self.cfg.data_path(f"brain_{self.run_id}.json"))
             self.set_status("live", f"Live – {total} Märkte, WebSocket-Daten, simulierte Ausführung", 1.0)
+
+    def _history_snapshot(self) -> dict[str, History]:
+        """Loaded + live bars of every market as History objects (funding per bar from the feed cache)."""
+        out = {}
+        for coin, s in self.series.items():
+            if len(s) <= self.cfg.signal.warmup_bars:
+                continue
+            a = s.arrays()
+            bars = [Bar(int(t), float(o), float(h), float(l), float(c), float(v), int(n))
+                    for t, o, h, l, c, v, n in zip(a["t"], a["o"], a["h"], a["l"], a["c"], a["v"], a["n"])]
+            fund = self.fund[coin]
+            ft = np.array([t for t in a["t"].tolist() if t in fund], dtype=np.int64)
+            out[coin] = History(coin=coin, interval=self.cfg.signal.interval, bars=bars, funding_t=ft,
+                                funding_rate=np.array([fund[t][0] for t in ft.tolist()]),
+                                premium=np.array([fund[t][1] for t in ft.tolist()]))
+        return out
+
+    async def _clean_replay(self) -> None:
+        """Re-learn the loaded history of all markets *together, bar by bar* with a fresh brain – exactly like
+        a backtest, so no market learns from another market's future – and swap it in. The market-by-market
+        warm start keeps the bot working while this runs."""
+        hist = self._history_snapshot()
+        if len(hist) < 2:
+            return
+        specs = {c: self.specs[c] for c in hist}
+        bars = sum(len(h.bars) for h in hist.values())
+        self.set_status("pretrain", f"Lernstand: verschränktes Vortraining über {len(hist)} Märkte "
+                                    f"({bars:,} Bars) – Live-Handel läuft weiter".replace(",", "."), 0.0)
+        brain = Brain(self.cfg, list(self.specs))
+
+        def prog(x):
+            self.status["progress"] = round(x, 3)
+
+        def job():
+            prepared = prepare_features(hist, specs, self.cfg.signal.interval, self.cfg.signal.use_lead_lag)
+            run_backtest(self.cfg, specs, hist, brain, self.calib or None, None, False, False, prog, prepared)
+
+        t0 = time.time()
+        await asyncio.to_thread(job)
+        if self._stop.is_set():
+            return
+        for coin, h in hist.items():   # live keeps learning from the next bar on, nothing twice
+            brain.trained_until[coin] = int(h.bars[-1].t) + self.bar_ms
+        self.brain = brain
+        self.engine.brain = brain
+        log.info("Verschränktes Vortraining fertig in %.0fs: %d saubere Auswertungen, Bewegung Ø %.1f bps",
+                 time.time() - t0, brain.n_clean, brain._pooled_move() * 1e4)
+        self.engine.log_event(self.now(), "", "INFO",
+                              f"Lernstand ersetzt: zeitlich verschränkt über {len(hist)} Märkte neu gelernt "
+                              f"({brain.n_clean:,} saubere Auswertungen) – kein markt-übergreifender "
+                              f"Zukunfts-Leak".replace(",", "."))
 
     async def _clock_loop(self) -> None:
         while not self._stop.is_set():

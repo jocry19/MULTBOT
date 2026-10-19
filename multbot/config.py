@@ -98,6 +98,7 @@ class LearningCfg:
     l2: float = 0.0005
     meta_min_samples: int = 200
     pretrain_on_history: bool = True
+    clean_replay: bool = True          # live: once all history is loaded, re-learn time-interleaved (leak-free)
     live_history_bars: int = 600
     history_bars: int = 4000
     persist_every_s: int = 60
