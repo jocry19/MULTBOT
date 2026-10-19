@@ -10,10 +10,11 @@
     { key: "RISK", f: "F5", name: "RISIKO" }, { key: "RES", f: "F6", name: "FORSCHUNG" },
     { key: "BLTR", f: "F7", name: "BLOTTER" }, { key: "JRNL", f: "F8", name: "JOURNAL" },
     { key: "SYS", f: "F9", name: "SYSTEM" }, { key: "HELP", f: "F10", name: "HILFE" },
+    { key: "LAB", f: "F11", name: "ALPHA-LABOR" },
   ];
   const ALIASES = { MONITOR: "MON", OVERVIEW: "MON", LEARN: "LRN", LERNEN: "LRN", RISIKO: "RISK", RESEARCH: "RES",
     FORSCHUNG: "RES", BLOTTER: "BLTR", TRADES: "BLTR", LOG: "JRNL", JOURNAL: "JRNL", SYSTEM: "SYS", "?": "HELP", H: "HELP",
-    SIGNALE: "SIG", SIGNAL: "SIG", HILFE: "HELP", CHART: "ASSET", DES: "ASSET" };
+    SIGNALE: "SIG", SIGNAL: "SIG", HILFE: "HELP", CHART: "ASSET", DES: "ASSET", ALPHA: "LAB", LABOR: "LAB" };
 
   const A = { S: null, page: "MON", coin: null, cache: {}, fetchedAt: {}, built: null, ws: null, history: [],
     hIdx: -1, jFilter: "ALL", jSearch: "", tradeSel: null, tapeAt: 0 };
@@ -847,6 +848,41 @@
     status("Research gestartet (" + mode + ") – lädt Historie, kalibriert Kosten, Walk-Forward …");
   }
 
+  /* ── F11 ALPHA-LABOR ────────────────────────────────────────────────── */
+  RENDER.LAB = {
+    build: () => panel("lhead", "Alpha-Labor · jede Signal-Familie nach echten Kosten, zwei Zeithälften", "LAB", "c12") +
+      panel("lsum", "Befund", "VERDICT", "c12") +
+      panel("ltab", "Hypothesen × Haltedauer · oben: Signal pur (bps je Trade), unten: echter Bot-Trade mit Maximalhebel (USD je 100 USD Margin) · A | B = erste | zweite Hälfte", "TESTS", "c12", { flush: true }),
+    init() { A.fetchedAt.lab = 0; },
+    async update() {
+      const r = await fetchCached("lab", "/api/lab", A.cache.lab && A.cache.lab.running ? 2000 : 20000);
+      if (!r) return;
+      const rep = r.report;
+      set("lhead", `<div class="row"><button class="btn" id="btn-lab">▶ Alpha-Labor starten</button>` +
+        `<span class="dim">${r.running ? "läuft … " + pct(r.progress, 0) + " (erster Lauf lädt ~208 Tage Stunden-Historie inkl. Funding, danach Cache)" : rep ? `erzeugt ${ts(rep.generated, true)} · ${rep.markets} Märkte · ${rep.bars.toLocaleString()} Stunden · ${ts(rep.start, true)} → ${ts(rep.end, true)} · Hälfte A bis ${ts(rep.split, true)}` : "noch kein Lauf"}</span>` +
+        (r.error ? `<span class="down">Fehler: ${esc(r.error)}</span>` : "") + `</div>` + (r.running ? `<div class="progress" style="margin-top:6px"><i style="width:${r.progress * 100}%"></i></div>` : "") +
+        `<p class="note">Jede Hypothese ist eine fest vorab definierte Regel (keine Optimierung auf die Daten). Gezählt wird nach Gebühren, Markteinfluss und Funding. <b>Signal pur</b>: Einstieg zum Schlusskurs, Ausstieg nach H Stunden, Einstiege zu jeder Stunde (keine Uhrzeit bevorzugt). <b>Maximalhebel</b>: 100 USD Margin × Max-Hebel, Stop bei 60 % der Liquidationsdistanz an Stunden-Hochs/-Tiefs – so wie der Bot wirklich handelt. ✓ = in beiden Hälften positiv.</p>`);
+      const b = $("#btn-lab");
+      if (b) b.onclick = async () => { await getJSON("/api/lab/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }); A.fetchedAt.lab = 0; status("Alpha-Labor gestartet"); };
+      if (!rep) return;
+      set("lsum", `<div class="metrics">${metric("Tests", rep.n_tests)}${metric("in beiden Hälften ✓", rep.n_consistent, rep.n_consistent > rep.expected_by_luck ? "up" : "", "ohne Markt-Referenz")}` +
+        metric("durch Zufall ≤", rep.expected_by_luck, "", "falls keine Kante existiert") + metric("Markt-Trend ✓", rep.beta_consistent ? "ja" : "nein", rep.beta_consistent ? "up" : "", "immer long") +
+        metric("Kosten Median", f(rep.cost_bps_median, 1) + " bps", "down", "je Round-Trip") + metric("Rechenzeit", rep.elapsed_s + " s") + `</div>` +
+        `<p class="note">${rep.n_consistent <= rep.expected_by_luck ? "Ehrlich: Es bestehen <b>nicht mehr Tests, als durch Zufall zu erwarten wäre</b>. In diesen Daten gibt es keine einfache, stabile Kante nach Kosten – vor allem kurze Haltedauern verlieren durchweg an den Gebühren. Der Bot lernt live weiter; das Labor lässt sich jederzeit neu starten, um zu sehen, ob sich das ändert." : "Mehr Tests bestehen als durch Zufall zu erwarten – die markierten Familien sind Kandidaten für eine eigene Strategie (trotzdem erst im Walk-Forward prüfen)."}</p>`);
+      const byKey = {};
+      (rep.rows || []).forEach((x) => { (byKey[x.key] = byKey[x.key] || { name: x.name, family: x.family, why: x.why, h: {} }).h[x.hours] = x; });
+      const hours = [...new Set((rep.rows || []).map((x) => x.hours))];
+      const cell = (x) => {
+        const h = x.hold, m = x.maxlev;
+        const v = (o, k) => (o && isNum(o[k]) ? o[k] : null);
+        const one = (a, b, k, d, unit) => `<span class="${cls(v(a, k))}">${isNum(v(a, k)) ? sgn(v(a, k), d) : "-"}</span> | <span class="${cls(v(b, k))}">${isNum(v(b, k)) ? sgn(v(b, k), d) : "-"}</span> ${unit}`;
+        return `<td style="${x.consistent ? "background:rgba(35,209,139,.12)" : ""}">${x.consistent ? '<b class="up">✓</b> ' : ""}${one(h.A, h.B, "net_bps", 1, "bps")}<br><span class="dim">${one(m.A, m.B, "usd", 2, "$")}</span></td>`;
+      };
+      set("ltab", `<table class="t"><thead><tr><th class="l">Familie</th><th class="l">Hypothese</th>${hours.map((h) => `<th>${h} h halten</th>`).join("")}</tr></thead><tbody>` +
+        Object.values(byKey).map((k) => `<tr><td class="l dim">${esc(k.family)}</td><td class="l" title="${esc(k.why)}"><b class="amber">${esc(k.name)}</b><br><span class="dim">${esc(k.why)}</span></td>${hours.map((h) => (k.h[h] ? cell(k.h[h]) : "<td>-</td>")).join("")}</tr>`).join("") + `</tbody></table>`);
+    },
+  };
+
   /* ── F7 BLOTTER ─────────────────────────────────────────────────────── */
   RENDER.BLTR = {
     build: () => panel("bsum", "Trade-Statistik (gesamte Historie aus der Datenbank)", "STAT", "c12") +
@@ -945,7 +981,7 @@
   RENDER.HELP = {
     build: () => panel("help", "Kommandos", "HELP", "c6") + panel("how", "Wie der Bot denkt", "DOC", "c6"),
     update() {
-      const cmds = [["GEV &lt;GO&gt;", "Asset-Seite (Chart, Buch, Stimmen) eines Marktes"], ["MON / SIG / LRN / RISK / RES / BLTR / JRNL / SYS", "Seiten (oder F1–F10)"],
+      const cmds = [["GEV &lt;GO&gt;", "Asset-Seite (Chart, Buch, Stimmen) eines Marktes"], ["MON / SIG / LRN / RISK / RES / BLTR / JRNL / SYS / LAB", "Seiten (oder F1–F11)"],
         ["GEV SIG", "Signal-Matrix"], ["PAUSE / RESUME", "Neue Einstiege pausieren / fortsetzen"], ["FLAT [GEV]", "Position(en) simuliert schließen"],
         ["RESET", "Papierkonto zurücksetzen (Lernstand bleibt)"], ["RUN RES", "Forschungslauf (Walk-Forward + Monte Carlo) starten"], ["Esc oder /", "Kommandozeile fokussieren"], ["↑ / ↓", "Kommando-Historie"]];
       set("help", `<table class="t help"><tbody>${cmds.map(([k, v]) => `<tr><td class="l"><span class="kbd">${k}</span></td><td class="l">${v}</td></tr>`).join("")}</tbody></table>`);

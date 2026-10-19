@@ -56,6 +56,16 @@ class JSON(Response):
 
 def create_app(cfg: Config, runner: BaseRunner) -> Starlette:
     research_state = {"running": False, "progress": 0.0, "error": None, "report": None}
+    lab_state = {"running": False, "progress": 0.0, "error": None, "report": None}
+
+    def load_lab():
+        p = cfg.data_path("research", "lab_latest.json")
+        if p.exists():
+            try:
+                return json.loads(p.read_text())
+            except json.JSONDecodeError:
+                return None
+        return None
 
     def load_research():
         for name in ("research_latest.json", f"pretrain_{runner.run_id}.json"):
@@ -189,6 +199,36 @@ def create_app(cfg: Config, runner: BaseRunner) -> Starlette:
         asyncio.create_task(job())
         return JSON({"ok": True})
 
+    async def lab(_: Request):
+        rep = lab_state["report"] or load_lab()
+        return JSON({"report": rep, "running": lab_state["running"], "progress": lab_state["progress"],
+                     "error": lab_state["error"]})
+
+    async def lab_run(request: Request):
+        if lab_state["running"]:
+            return JSON({"ok": False, "msg": "läuft bereits"})
+        body = {}
+        try:
+            body = await request.json()
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        async def job():
+            from ..research.lab import run_lab_live
+            lab_state.update(running=True, progress=0.0, error=None)
+            try:
+                def prog(x):
+                    lab_state["progress"] = round(x, 3)
+                lab_state["report"] = await run_lab_live(cfg, body.get("top"), int(body.get("bars") or 5000), prog)
+            except Exception as e:  # noqa: BLE001
+                log.exception("Alpha-Labor fehlgeschlagen")
+                lab_state["error"] = str(e)
+            finally:
+                lab_state["running"] = False
+
+        asyncio.create_task(job())
+        return JSON({"ok": True})
+
     async def history(request: Request):
         kind = request.path_params["kind"]
         if not runner.store:
@@ -240,6 +280,8 @@ def create_app(cfg: Config, runner: BaseRunner) -> Starlette:
         Route("/api/signals", signals),
         Route("/api/research", research),
         Route("/api/research/run", research_run, methods=["POST"]),
+        Route("/api/lab", lab),
+        Route("/api/lab/run", lab_run, methods=["POST"]),
         Route("/api/history/{kind}", history),
         Route("/api/corr", corr),
         Route("/api/config", config),

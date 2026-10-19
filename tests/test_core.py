@@ -629,3 +629,28 @@ def test_fixed_mode_metrics_are_additive():
     m = equity_metrics(eq, 300_000, reference=1000.0)
     assert m["pnl_usd"] == pytest.approx(400.0) and m["max_dd_usd"] == pytest.approx(1200.0)
     assert m["chained_return"] == pytest.approx(0.4)
+
+
+def test_alpha_lab_runs_and_finds_a_planted_edge(cfg):
+    """The lab must detect a real edge (planted momentum in one half of the markets) and report consistency."""
+    from multbot.research.lab import evaluate, Panel, run_lab
+    specs = offline_specs(cfg)
+    rng = np.random.default_rng(7)
+    hist = {}
+    n = 1200
+    t = (np.arange(n) * 3_600_000 + 1_700_002_800_000).astype(np.int64)
+    for j, (coin, spec) in enumerate(specs.items()):
+        r = rng.normal(0, 0.004, n)
+        if j % 2 == 0:                       # persistent trends: tomorrow follows the last 3 days
+            for i in range(72, n):
+                r[i] += 0.25 * r[i - 72:i].mean()
+        c = 100 * np.exp(np.cumsum(r))
+        bars = [Bar(int(t[i]), c[i - 1] if i else c[0], c[i] * 1.001, c[i] * 0.999, c[i], 10.0, 5) for i in range(n)]
+        hist[coin] = History(coin=coin, interval="1h", bars=bars, funding_t=t, funding_rate=np.zeros(n),
+                             premium=np.zeros(n))
+    rep = run_lab(hist, specs, {c: {"spread_bps": 2.0, "depth_usd": 1e7} for c in specs}, horizons_h=(24,))
+    assert rep["markets"] == len(specs) and rep["n_tests"] == len(rep["rows"])
+    P = Panel(hist, specs, {c: {"spread_bps": 2.0, "depth_usd": 1e7} for c in specs})
+    good = evaluate(P, P.past_z(72), 24, thr=1.0)
+    bad = evaluate(P, -P.past_z(72), 24, thr=1.0)
+    assert good["A"]["net_bps"] > bad["A"]["net_bps"] and good["B"]["net_bps"] > bad["B"]["net_bps"]

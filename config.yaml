@@ -404,6 +404,8 @@ execution:
 research:
   train_frac: 0.40              # Walk-Forward: erste 40 % nur lernen, Rest out-of-sample handeln
   max_markets: 40               # Research auf den N volumenstärksten Märkten (0 = alle, dauert lange)
+  lab_markets: 80               # Alpha-Labor (LAB): N liquideste Märkte, ~208 Tage Stunden-Historie inkl. Funding
+                                # (erster Lauf lädt ca. 30–40 min, danach aus dem Cache in Sekunden)
   mc_paths: 3000
   mc_trades: 200
 

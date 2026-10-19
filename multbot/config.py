@@ -126,6 +126,7 @@ class ExecutionCfg:
 class ResearchCfg:
     train_frac: float = 0.40
     max_markets: int = 40
+    lab_markets: int = 80              # alpha lab: most liquid markets (hourly history incl. funding)
     mc_paths: int = 3000
     mc_trades: int = 200
 

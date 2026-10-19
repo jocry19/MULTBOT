@@ -3,6 +3,7 @@
     python -m multbot run          # live paper trading on Hyperliquid data + terminal dashboard
     python -m multbot sim          # offline simulation with a synthetic market (accelerated)
     python -m multbot research     # walk-forward backtest, Monte Carlo, signal research
+    python -m multbot lab          # alpha lab: every signal family net of costs, two halves of history
     python -m multbot markets      # live market table for the configured assets
     python -m multbot report       # account summary from the database
     python -m multbot shortcut     # desktop shortcut that opens the terminal as an app window
@@ -167,6 +168,25 @@ def cmd_shortcut(args) -> None:
     print("Doppelklick startet den Bot und öffnet das Terminal als eigenes App-Fenster.")
 
 
+def cmd_lab(args) -> None:
+    cfg = load_config(args.config)
+    if args.data_dir:
+        cfg.data_dir = args.data_dir
+    from .research.lab import print_lab, run_lab_live
+
+    last = [-1]
+
+    def prog(x):
+        p = int(x * 20)
+        if p != last[0]:
+            last[0] = p
+            print(f"\r[{'#' * p}{'.' * (20 - p)}] {x:5.1%}", end="", flush=True)
+
+    rep = asyncio.run(run_lab_live(cfg, args.top, args.bars, prog))
+    print()
+    print_lab(rep)
+
+
 def cmd_research(args) -> None:
     cfg = load_config(args.config)
     if args.data_dir:
@@ -274,6 +294,10 @@ def main(argv=None) -> None:
         sp.add_argument("--seed", type=int, default=None, help="Sim: Zufalls-Seed")
         sp.add_argument("--markets", type=int, default=20, help="Sim: Anzahl synthetischer Märkte")
 
+    sl = sub.add_parser("lab", help="Alpha-Labor: alle Signal-Familien nach Kosten, zwei Zeithälften")
+    sl.add_argument("--top", type=int, default=None, help="N liquideste Märkte (Standard: research.lab_markets)")
+    sl.add_argument("--bars", type=int, default=5000, help="Stunden-Bars Historie (max. 5000 ≈ 208 Tage)")
+
     sr = sub.add_parser("research", help="Walk-Forward-Backtest + Forschung")
     sr.add_argument("--interval", default=None)
     sr.add_argument("--bars", type=int, default=None)
@@ -298,6 +322,8 @@ def main(argv=None) -> None:
         cmd_run(args, sim=True)
     elif args.cmd == "research":
         cmd_research(args)
+    elif args.cmd == "lab":
+        cmd_lab(args)
     elif args.cmd == "markets":
         cmd_markets(args)
     elif args.cmd == "shortcut":
