@@ -95,7 +95,7 @@ class SignalCfg:
 class LanguageCfg:
     kappa: float = 100.0               # evidence a phrase needs before it outweighs the shorter phrase
     kappa_dialect: float = 300.0       # … for a market's own dialect
-    z_full: float = 4.0                # confidence (z) at which the language "speaks" with full conviction
+    z_full: float = 6.0                # confidence (z) at which the language "speaks" with full conviction
     exit_on_reversal: bool = False     # close when the language turns against the position (walk-forward: off)
 
 

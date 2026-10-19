@@ -378,7 +378,10 @@ signal:
 language:                       # Marktsprache (signal.mode: language)
   kappa: 100                    # wie viele Belege eine Phrase braucht, bis sie mehr zählt als die kürzere Phrase
   kappa_dialect: 300            # … für den eigenen „Dialekt“ eines Markts
-  z_full: 4.0                   # Sicherheit (z), ab der die Sprache mit voller Überzeugung „spricht“
+  z_full: 6.0                   # Sicherheit (z), ab der die Sprache mit voller Überzeugung „spricht“; Einstieg ab
+                                # z ≈ entry_threshold × z_full ≈ 1,7 (Walk-Forward: vorsichtiger war besser)
+  exit_on_reversal: false       # schließen, wenn die Sprache gegen die Position dreht (Walk-Forward: aus –
+                                # Stops, Take-Profit, Trailing und Zeit entscheiden über den Ausstieg)
 
 learning:
   hedge_eta: 0.06               # Lernrate der Multiplicative-Weights

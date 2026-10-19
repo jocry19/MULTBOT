@@ -10,6 +10,12 @@ im Plus erwartet werden. Zur Bedienung gibt es ein Terminal-Dashboard im Bloombe
 
 ## Neu in MULT Q2
 
+- **Marktsprache (Standard, F12).** Keine festen Strategien mehr: Jede Kerze wird zu einem Wort aus Bewegung,
+  Volumen und Spanne, jeweils am eigenen Verhalten des Markts gemessen. Dazu kommt die Stimmung des
+  Gesamtmarkts. Der Bot lernt live, was auf welche Wortfolgen folgt, mit Vergessen und einem eigenen
+  „Dialekt“ je Markt. Er „spricht“ (handelt) nur mit genug Belegen und wenn die erwartete Bewegung die
+  Kosten übersteigt. Im Walk-Forward war das besser als die bisherigen Regel-Strategien, siehe unten.
+
 - **Alpha-Labor (F11, `python -m multbot lab`).** Das Labor prüft rund 90 vorab festgelegte Strategie-Hypothesen
   auf ≈ 208 Tagen Stunden-Historie der liquidesten Märkte:
   - Momentum, Reversion, Querschnitt, Residual-Reversion, Funding-Carry, Prämie, Effekte bei Aktien-Perps und
@@ -260,6 +266,30 @@ Statt fester Strategien liest der Bot den Markt wie eine Sprache, die er live le
 
 Die Regel-Strategien laufen im Hintergrund weiter und lernen mit. Unter LRN siehst du, wie sie sich im
 Vergleich schlagen. Mit `signal.mode: ensemble` entscheiden wieder sie.
+
+**Wie gut liest sie?** Walk-Forward, gleiche Kosten und Regeln, PnL in USD, Validierung / Holdout:
+
+| Variante | 5m (14 Tage) | 15m (52 Tage) | Summe |
+|---|---|---|---|
+| Ensemble aus Regel-Strategien (bisheriger Standard) | +129 / −171 | −56 / +30 | −68 |
+| Sprache v1: nur das letzte Wort, Ausstieg bei Umkehr | −1.580 / −1.011 | – | weit im Minus |
+| Sprache v2: Satzzusammenhang + Stundenverlauf | +134 / −185 | −746 / −149 | −945 |
+| v2 ohne Umkehr-Ausstieg | +107 / −214 | +20 / +206 | +119 |
+| **v2 ohne Umkehr-Ausstieg, vorsichtig (z 6) – Standard** | +246 / −153 | −42 / +169 | **+220** |
+
+Was die Entwicklung gezeigt hat:
+
+- **Version 1 war unbrauchbar.** Die Vorhersage hing am jeweils letzten Wort und wechselte mit jeder Kerze. 78 %
+  der Trades endeten durch „Signalumkehr“: dauernd rein und raus, jedes Mal Gebühren.
+- **Version 2 liest im Zusammenhang.** Sie berücksichtigt den Stundenverlauf und entscheidet nach dem, was der
+  Markt *zuletzt* gesagt hat. Die Sprache bestimmt nur noch den Einstieg; Stops, Take-Profit, Trailing und Zeit
+  regeln den Ausstieg.
+- **Die Standard-Variante ist die einzige, die auf beiden Datensätzen im Plus liegt.**
+
+> **Ehrlich:** Das ist besser als das Ensemble, aber kein Beweis für Profitabilität. Die Schwankungsbreite liegt
+> bei ±250–650 USD je Fenster. Das 5m-Holdout ist bei *allen* Varianten negativ, und die Sprache handelt mehr
+> (≈ 400 statt ≈ 100–150 Trades je Fenster). Ihr Vorteil: Sie ist nicht auf eine feste Idee festgelegt und
+> passt sich an, wenn der Markt „anders spricht“.
 
 ### Lernen
 
