@@ -2,7 +2,10 @@ MULTBOT - Perpetual Signal Bot (Paper-Trading, maximaler Hebel)
 ===============================================================
 
 KAPITAL: unbegrenzt. Jede Position bekommt 100 USD Margin x Maximalhebel
-(z.B. 10x -> 1.000 USD, BTC 40x -> 4.000 USD), hoechstens 5 gleichzeitig.
+(z.B. 10x -> 1.000 USD, BTC 40x -> 4.000 USD), beliebig viele gleichzeitig.
+Die Kandidaten jeder 5-Minuten-Bar werden nach erwarteter Rendite auf die
+Margin gerankt (Bewegung x Hebel - Kosten); genommen werden die besten, die
+nach Kosten im Plus erwartet werden.
 Gemessen wird der PnL in USD (realisiert + offen) - kein Kontostand, der
 limitiert, kein Totalverlust. Einstellbar in config.yaml unter "account".
 

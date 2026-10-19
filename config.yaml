@@ -367,6 +367,8 @@ signal:
   max_new_per_bar: null         # höchstens so viele neue Positionen je Bar (die besten; null = kein Limit)
   move_shrink: 2000             # wie stark eine Zelle der gelernten Bewegungs-Tabelle (Signalstärke ×
                                 # Volatilität) zum Gesamtdurchschnitt gezogen wird (Pseudo-Beobachtungen)
+  move_prior_bps: 2.5           # Startwert der erwarteten Bewegung (Walk-Forward: ≈ 2–3 bps je Stunde),
+  move_prior_n: 5000            # zählt wie so viele Beobachtungen, bis echte Live-Daten da sind
   use_lead_lag: false           # Lead-Lag-Features ggü. BTC / XYZ100. Walk-Forward: auf 5m und 15m schlechter
   disabled_strategies: [leadlag] # Strategien, die nie ins Ensemble gehen (Schlüssel wie im Terminal)
 

@@ -14,7 +14,7 @@ from multbot.engine.risk import RiskManager, liq_price
 from multbot.engine.sim import SyntheticMarket
 from multbot.exchange.meta import build_specs, hip3_fee_multiplier, offline_specs
 from multbot.features.micro import MicroState
-from multbot.features.pipeline import compute_features, row
+from multbot.features.pipeline import ML_FEATURES, compute_features, row
 from multbot.learning.brain import Brain
 from multbot.learning.hedge import Hedge
 from multbot.learning.online_lr import OnlineLogit
@@ -421,16 +421,23 @@ def test_history_cache_refetches_missing_older_range(cfg, tmp_path):
 def test_expected_move_table_learns_per_bucket(cfg):
     """The expected favourable move is learned per |score| × volatility bucket, shrunk to the pooled mean."""
     brain = Brain(cfg, ["A"])
-    assert brain.expected_move(0.3, 0.001) is None                      # nothing learned yet
+    assert brain.expected_move(0.3, 0.001) == pytest.approx(2.5e-4)     # nothing learned yet: cautious prior
     rng = np.random.default_rng(0)
     for _ in range(6000):
         sc, vol = rng.choice([0.3, 0.7]), 0.001
         fav = (0.0006 if sc < 0.5 else -0.0004) + rng.normal(0, 0.002)   # strong signals revert
         brain.move.add(fav)
         brain._move_cell(sc, vol).add(fav)
+    for _ in range(3000):                                               # live pre-training never feeds the table
+        brain.observe("A", 0, 100.0, 0.001, "TREND-HIGH", {"scores": {}, "ens": 0.5, "final": 0.5, "p_up": 0.6,
+                      "x": np.zeros(len(ML_FEATURES))}, {}, None, 1, 0.0, pretrain=True)
+    n0 = brain.move.n
+    for i in range(brain.H):
+        brain.on_bar("A", 100.0 * (1 + 0.01 * (i + 1)), i)
+    assert brain.move.n == n0
     mid, strong = brain.expected_move(0.3, 0.001), brain.expected_move(-0.7, 0.001)
     assert mid > 0.0003 and strong < 0 and mid > strong
-    assert brain.expected_move(0.3, 0.02) == pytest.approx(brain.move.m)   # empty bucket → pooled mean
+    assert brain.expected_move(0.3, 0.02) == pytest.approx(brain._pooled_move())   # empty bucket → pooled
     d = brain.to_dict()
     b2 = Brain(cfg, ["A"])
     from multbot.learning.brain import _json_default

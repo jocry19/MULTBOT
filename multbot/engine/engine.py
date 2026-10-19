@@ -99,7 +99,7 @@ class Engine:
             log.info("[%s] %s %s", kind, coin, text)
 
     # ── bar close: the main decision step ─────────────────────────────────
-    def analyze(self, coin: str, t: int, frow: dict[str, float], learn: bool = True) -> dict:
+    def analyze(self, coin: str, t: int, frow: dict[str, float], learn: bool = True, pretrain: bool = False) -> dict:
         """Regime, strategy votes, ensemble decision and meta model for one closed bar."""
         cfg = self.cfg
         regime = classify(frow, 0.75 if cfg.risk.skip_stale_markets else 1.01, cfg.risk.max_oracle_age_min)
@@ -116,11 +116,10 @@ class Engine:
         exp_move = exp_roe = None
         if cand:
             exp_move = self.brain.expected_move(final, frow.get("vol", 0.0))   # in signal direction
-            if exp_move is not None:
-                exp_roe = self.specs[coin].leverage * (exp_move - cost)   # net return on the 100 USD margin
+            exp_roe = self.specs[coin].leverage * (exp_move - cost)        # net return on the 100 USD margin
         if learn:
             self.brain.observe(coin, t, frow["close"], frow.get("vol", 1e-4), regime.label, d, frow, meta_x, cand,
-                               cost)
+                               cost, pretrain)
         return {"regime": regime, "sig": sig, "d": d, "final": final, "cand": cand, "meta_x": meta_x, "pwin": pwin,
                 "exp_move": exp_move, "exp_roe": exp_roe, "cost": cost}
 
@@ -134,7 +133,7 @@ class Engine:
     def learn_bar(self, coin: str, t: int, frow: dict[str, float]) -> None:
         """Learning only (history pre-training): no views, no positions, no orders."""
         self.brain.on_bar(coin, frow["close"], t)
-        self.analyze(coin, t, frow, learn=True)
+        self.analyze(coin, t, frow, learn=True, pretrain=True)
 
     def on_bar_close(self, coin: str, t: int, frow: dict[str, float], n_bars: int, trade: bool = True,
                      learn: bool = True) -> None:

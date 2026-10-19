@@ -146,11 +146,11 @@ class Brain:
 
     # ── observation / resolution ─────────────────────────────────────────
     def observe(self, coin: str, t: int, px: float, vol: float, regime: str, d: dict, frow: dict[str, float],
-                meta_x: np.ndarray | None, side: int, cost: float) -> None:
+                meta_x: np.ndarray | None, side: int, cost: float, pretrain: bool = False) -> None:
         self.pending[coin].append({
             "t": t, "px": px, "vol": max(vol, 1e-6), "regime": regime, "scores": d["scores"], "ens": d["ens"],
             "final": d["final"], "p_up": d["p_up"], "x": d["x"], "meta_x": meta_x, "side": side, "cost": cost,
-            "age": 0,
+            "age": 0, "pre": pretrain,
         })
         self.n_observed += 1
         self.last_t = max(self.last_t, t)
@@ -191,8 +191,12 @@ class Brain:
             pm = self.meta.predict(it["meta_x"])
             self.cal_meta.add(pm, win)
             self.meta.update(it["meta_x"], win)
-        if h == self.H and it["side"]:
-            fav = it["side"] * ret            # flat bars count too: a trade there only pays its costs
+        if h == self.H and it["side"] and not it.get("pre"):
+            # Live history pre-training runs market by market, so a later market's signals already benefit from
+            # what the brain learned on other markets over the same period – fine for warm-starting weights, but
+            # it would overstate how far signals move. The move table therefore learns only from clean data.
+            cap = 4.0 * it["vol"] * math.sqrt(h)                  # winsorise pumps / dumps of thin markets
+            fav = it["side"] * max(-cap, min(cap, ret))           # flat bars count too: a trade only pays costs
             self.move.add(fav)
             self._move_cell(it["final"], it["vol"]).add(fav)
         if h != self.H or flat:
@@ -246,18 +250,20 @@ class Brain:
         si = sum(sig_h >= e for e in MOVE_S_EDGES)
         return self.move_cells[fi][si]
 
-    def expected_move(self, final: float, vol: float) -> float | None:
+    def _pooled_move(self) -> float:
+        sc, g = self.cfg.signal, self.move
+        return (g.w * g.m + sc.move_prior_n * sc.move_prior_bps / 1e4) / (g.w + sc.move_prior_n)
+
+    def expected_move(self, final: float, vol: float) -> float:
         """Expected move in the signal's direction over the learning horizon (fraction of price), learned from
         what candidates with this signal strength and volatility actually did. A non-parametric table on
         purpose: in walk-forward tests the edge did not grow with the score – the strongest signals and the
         most volatile markets did worst – so a linear "score × volatility" model ranks them the wrong way.
-        Each cell is shrunk towards the pooled mean with ``move_shrink`` pseudo-observations."""
-        g = self.move
-        if g.n < 500:
-            return None
+        Each cell is shrunk towards the pooled mean with ``move_shrink`` pseudo-observations, the pooled mean
+        towards a cautious prior (``move_prior_bps``) until enough has been observed."""
         c = self._move_cell(final, vol)
         k = self.cfg.signal.move_shrink
-        return (c.w * c.m + k * g.m) / (c.w + k)
+        return (c.w * c.m + k * self._pooled_move()) / (c.w + k)
 
     def learn_trade(self, meta_x, win: bool) -> None:
         """Real closed trades teach the meta model with extra weight."""
@@ -307,7 +313,7 @@ class Brain:
                      "ready": self.meta_ready},
             "hit_recent": float(np.mean(self.recent_final)) if self.recent_final else None,
             "ic_final": self.ic[FINAL][self.H].corr, "muted": sorted(self.muted),
-            "move_mean": self.move.m if self.move.n else None, "move_n": self.move.n,
+            "move_mean": self._pooled_move(), "move_n": self.move.n,
             "weights": self.hedge_global.weights(),
         }
         if light:

@@ -2,9 +2,11 @@
 
 MULTBOT ist ein selbstlernender Signal-Bot für Perpetuals auf **Hyperliquid**. Er funktioniert auch mit den
 HIP-3-Märkten des `xyz`-Dex (Aktien-Perps wie `xyz:GEV`). Er handelt **simuliert**, und **jede Position
-hat 100 USD Margin** beim **maximalen Hebel** des jeweiligen Marktes. Es sind höchstens **5 Positionen**
-gleichzeitig offen, das Kapital ist unbegrenzt, und gemessen wird der **PnL in USD**. Zur Bedienung gibt es ein
-Terminal-Dashboard im Bloomberg-Stil.
+hat 100 USD Margin** beim **maximalen Hebel** des jeweiligen Marktes. Das Kapital ist unbegrenzt, es dürfen
+**beliebig viele Positionen** offen sein, und gemessen wird der **PnL in USD**. Damit der Bot dabei keine
+unnötigen schlechteren Trades nimmt, rankt er die Kandidaten jeder Bar über alle Märkte nach **erwarteter
+Rendite auf die Margin** (erwartete Bewegung × Hebel − Kosten × Hebel) und nimmt nur Trades, die nach Kosten
+im Plus erwartet werden. Zur Bedienung gibt es ein Terminal-Dashboard im Bloomberg-Stil.
 
 > ⚠️ **Nur Simulation.** Der Bot liest ausschließlich öffentliche Marktdaten. Er signiert nichts und sendet
 > keine echten Orders. Das ist keine Anlageberatung. Perps mit hohem Hebel auf dünnen Märkten können in Minuten
@@ -166,12 +168,24 @@ Hyperliquid WS/REST ─► Mark-Preis-Kerzen + Orderbuch + Trades + Funding/OI
 - **Kapitalmodell `fixed` (Standard):**
   - Jede Position bekommt genau `position_margin_usd` (100 USD) Margin × Maximalhebel. Bei 10x sind das
     1.000 USD, bei BTC mit 40x 4.000 USD Positionsgröße.
-  - Es sind höchstens 5 Positionen offen. Das Kapital ist unbegrenzt, der Kontostand darf also nie
-    limitieren, und es gibt keinen Ruin.
+  - Es dürfen beliebig viele Positionen offen sein (`risk.max_open_positions: null`; eine Zahl setzt wieder
+    ein Limit). Das Kapital ist unbegrenzt, der Kontostand limitiert also nie, und es gibt keinen Ruin.
   - Gezeigt werden PnL gesamt (realisiert + offen), Ø pro Trade, Ø ROE auf die 100 USD, Trefferquote,
-    Profit-Faktor und Max-Drawdown in USD. Prozentwerte beziehen sich auf 5 × 100 = 500 USD Referenzkapital.
+    Profit-Faktor und Max-Drawdown in USD. Prozentwerte beziehen sich auf ein Referenzkapital von
+    10 × 100 = 1.000 USD (`account.reference_capital_usd`). Es ändert keinen Trade.
   - Reicht ein Orderbuch nicht für die volle 100-USD-Position, wird der Trade übersprungen statt verkleinert.
     So bleibt jede Position vergleichbar.
+- **Ranking nach erwarteter Rendite** (`signal.rank_entries`):
+  - Der Bot sammelt die Einstiegs-Kandidaten einer Bar über alle Märkte, bevor er handelt.
+  - Für jeden schätzt er die erwartete Bewegung in Signalrichtung. Sie wird gelernt aus dem, was Kandidaten mit
+    gleicher Signalstärke und Volatilität danach tatsächlich gemacht haben (Tabelle im Terminal unter LRN).
+  - Daraus wird **E[ROE] = Hebel × (erwartete Bewegung − Kosten)**. Die Kosten umfassen Gebühren, halben
+    Spread und Funding.
+  - Eingestiegen wird bestmöglich zuerst. So bekommen bei Klumpen- und Korrelationsgrenzen immer die
+    besseren Trades den Platz.
+  - Trades unter `min_exp_roe` (Standard 0, also nicht nach Kosten im Plus erwartet) werden übersprungen.
+  - Mit `max_new_per_bar` lässt sich zusätzlich begrenzen, wie viele neue Positionen je Bar entstehen.
+  - Im Journal, bei Orders und Trades steht jeweils E[ROE] und der Rang, z. B. „E[ROE] +1,2 % · Rang 1/14“.
 - **Kapitalmodell `compounding` (optional):** ein einziges Konto mit Startkapital, das wächst oder schrumpft.
   Bei Totalverlust beginnt eine neue *Epoche*, der Lernstand bleibt.
 
@@ -225,7 +239,8 @@ Lern-Horizont (Standard 12 Bars = 1 h) passiert Folgendes:
 
 Die Standardwerte in `config.yaml` sind nicht geschätzt. Sie wurden per Walk-Forward mit unberührtem
 Holdout ausgewählt, und zwar mit genau dem Modell, das live läuft: 100 USD Margin × Maximalhebel je
-Position, höchstens 5 offen, Maker-Einstiege, echtes Funding, Spreads aus den aktuellen Orderbüchern.
+Position, Maker-Einstiege, echtes Funding, Spreads aus den aktuellen Orderbüchern. Die folgende Tabelle wurde
+noch mit höchstens 5 offenen Positionen ermittelt. Zum Ranking siehe weiter unten.
 
 - **Daten:** die 60 liquidesten Märkte (33 Krypto, 18 Aktien, 4 Rohstoffe, 3 ETFs, 2 Indizes).
   - 5m-Kerzen über 14 Tage (5.–19. Okt. 2026)
@@ -269,6 +284,31 @@ Die Werte sind PnL-Differenzen der gesamten Strategie im jeweiligen Fenster, mit
 >
 > Der Bot lernt live weiter (Gewichte, ML- und Meta-Modell, IC je Markt). Ob daraus eine echte Kante wird,
 > zeigen erst Wochen Papierhandel. Verfolgen kannst du das im Terminal unter BRAIN und RESEARCH.
+
+**Unbegrenzte Positionen mit Ranking im selben Test** (PnL in USD, Validierung / Holdout):
+
+| Variante | 5m (14 Tage) | 15m (52 Tage) |
+|---|---|---|
+| max. 5 offen, ohne Ranking (vorher) | +61 / +45 | −113 / −33 |
+| max. 5 offen, gerankt, E[ROE] ≥ 0 | +54 / −37 | +3 / +130 |
+| unbegrenzt, gerankt, ohne Mindestwert | −97 / −136 | +23 / −86 |
+| **unbegrenzt, gerankt, E[ROE] ≥ 0 (Standard)** | −118 / −317 | +18 / +76 |
+| unbegrenzt, gerankt, E[ROE] ≥ +0,5 % | −33 / −201 | −24 / −86 |
+
+> **Ehrlich:**
+>
+> - **Das erste Modell war falsch herum.** Die erwartete Bewegung als „Signalstärke × Volatilität“ zu
+>   schätzen, war die naheliegende Idee. Die Trades mit der höchsten Erwartung verloren aber am meisten
+>   (oberste 20 %: Ø −2,41 USD je Trade). Die stärksten Signale und die volatilsten Märkte laufen
+>   anschließend eher zurück.
+> - **Deshalb eine Tabelle.** Das Ranking nutzt jetzt eine gelernte Tabelle. Sie bildet das ab und sortiert
+>   im Holdout in die richtige Richtung.
+> - **Mehr Positionen sind nicht automatisch mehr Gewinn.** Ohne Limit nimmt der Bot mehr Trades von
+>   ähnlicher Qualität, und die Kosten wachsen mit.
+> - **Die Mindesterwartung wirkt nicht stabil.** E[ROE] ≥ 0 hilft auf 15m in beiden Fenstern, schadet aber
+>   auf 5m. Dort bleiben vor allem günstige `xyz`-Märkte übrig, die im Backtest schlecht liefen.
+> - **Fazit:** Alle Unterschiede liegen innerhalb der statistischen Schwankung. Wer lieber das Limit will:
+>   `risk.max_open_positions: 5` setzen. Ranking und Mindesterwartung bleiben dabei aktiv.
 
 ---
 

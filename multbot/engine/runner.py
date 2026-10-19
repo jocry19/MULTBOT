@@ -168,9 +168,12 @@ class BaseRunner:
                      self.engine.account.epoch, self.engine.equity(), len(self.engine.account.positions))
         else:
             levs = sorted({s.leverage for s in self.specs.values()})
+            acc = self.cfg.account
+            cap = (f"je Position {acc.position_margin_usd:.0f} USD Margin, Kapital unbegrenzt" if acc.fixed
+                   else f"mit {acc.starting_balance:.2f} USD")
             self.engine.log_event(self.now(), "", "INFO",
-                                  f"Neues Papierkonto mit {self.cfg.account.starting_balance:.2f} USD – "
-                                  f"{len(self.specs)} Märkte, immer maximaler Hebel ({levs[0]}x–{levs[-1]}x)")
+                                  f"Neues Papierkonto {cap} – {len(self.specs)} Märkte, immer maximaler Hebel "
+                                  f"({levs[0]}x–{levs[-1]}x)")
         for coin, s in self.series.items():
             if len(s):
                 self.engine.last_px.setdefault(coin, s.last().c)
